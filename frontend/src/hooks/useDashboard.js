@@ -5,12 +5,12 @@ import axios from 'axios'
 const API = '/api'
 
 export function useDashboard() {
-  const [data, setData] = useState(null)
+  const [data,      setData]      = useState(null)
   const [connected, setConnected] = useState(false)
+  const [prices,    setPrices]    = useState({})  // live prices from WS stream
   const socketRef = useRef(null)
 
   useEffect(() => {
-    // Fetch immediately — returns fast now with cache
     axios.get(`${API}/dashboard`).then(r => setData(r.data)).catch(console.error)
 
     const socket = io({ path: '/socket.io', transports: ['websocket', 'polling'] })
@@ -18,6 +18,10 @@ export function useDashboard() {
     socket.on('connect',          () => setConnected(true))
     socket.on('disconnect',       () => setConnected(false))
     socket.on('dashboard_update', d  => setData(d))
+    // Real-time price ticks from Binance stream
+    socket.on('price_update', ({ pair, price, change }) => {
+      setPrices(prev => ({ ...prev, [pair]: { price, change } }))
+    })
     return () => socket.disconnect()
   }, [])
 
@@ -30,8 +34,7 @@ export function useDashboard() {
   }, [])
 
   return {
-    data,
-    connected,
+    data, connected, prices,
     startBot:       () => post('/bot/start'),
     stopBot:        () => post('/bot/stop'),
     setMode:        m  => post('/bot/mode', { mode: m }),
