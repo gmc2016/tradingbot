@@ -29,7 +29,11 @@ def init_db():
         ('position_size_usdt','100'),
         ('trading_mode', os.environ.get('TRADING_MODE', 'demo')),
         ('active_pairs', 'BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT'),
-        ('bot_running', 'false'), ('starting_balance', '1000')]:
+        ('bot_running', 'false'), ('starting_balance', '1000'),
+        ('binance_api_key', os.environ.get('BINANCE_API_KEY', '')),
+        ('binance_api_secret', os.environ.get('BINANCE_API_SECRET', '')),
+        ('newsapi_key', os.environ.get('NEWSAPI_KEY', '')),
+    ]:
         c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (k, v))
     conn.commit(); conn.close()
 
