@@ -1,0 +1,86 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-base:    #0f1117;
+  --bg-surface: #161b27;
+  --bg-card:    #1a2035;
+  --bg-hover:   #1f2840;
+  --border:     #2a3550;
+  --border-dim: #1e2d47;
+  --text:       #e2e8f0;
+  --text-2:     #8899b4;
+  --text-3:     #4a5a72;
+  --green:      #22c55e;
+  --green-dim:  #16a34a;
+  --green-bg:   rgba(34,197,94,0.12);
+  --red:        #ef4444;
+  --red-dim:    #dc2626;
+  --red-bg:     rgba(239,68,68,0.12);
+  --blue:       #3b82f6;
+  --blue-bg:    rgba(59,130,246,0.12);
+  --amber:      #f59e0b;
+  --amber-bg:   rgba(245,158,11,0.12);
+  --teal:       #14b8a6;
+  --radius:     8px;
+  --radius-lg:  12px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg-base);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+}
+
+input, select, textarea {
+  font-family: inherit;
+  font-size: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  outline: none;
+  width: 100%;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--teal);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.badge-buy    { background: var(--green-bg); color: var(--green); }
+.badge-sell   { background: var(--red-bg);   color: var(--red); }
+.badge-hold   { background: var(--bg-hover); color: var(--text-2); }
+.badge-bull   { background: var(--green-bg); color: var(--green); }
+.badge-bear   { background: var(--red-bg);   color: var(--red); }
+.badge-neutral{ background: var(--bg-hover); color: var(--text-2); }
+.badge-demo   { background: var(--blue-bg);  color: var(--blue); }
+.badge-live   { background: var(--green-bg); color: var(--green); }
+
+.pos { color: var(--green); }
+.neg { color: var(--red); }
