@@ -108,6 +108,21 @@ def run_now():
     try: scan_and_trade(); refresh_pair_cache(); push(); return jsonify({'ok':True})
     except Exception as e: return jsonify({'error':str(e)}), 500
 
+
+@app.route('/api/news/test')
+def news_test():
+    """Debug endpoint - check NewsAPI key and response directly."""
+    import os, requests
+    key = os.environ.get('NEWSAPI_KEY', '')
+    if not key:
+        return jsonify({'error': 'NEWSAPI_KEY not set'})
+    try:
+        r = requests.get('https://newsapi.org/v2/everything', timeout=15, params={
+            'q': 'bitcoin', 'apiKey': key, 'pageSize': 3, 'language': 'en'})
+        return jsonify({'status': r.status_code, 'body': r.json()})
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
 @socketio.on('connect')
 def on_connect():
     logger.info('Client connected')
@@ -118,3 +133,4 @@ if __name__ == '__main__':
     init_db()
     logger.info('Trading Bot starting on port 5000...')
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+# This line intentionally left blank
