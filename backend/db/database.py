@@ -152,3 +152,41 @@ def get_news(limit=20):
     conn = get_conn()
     rows = conn.execute('SELECT * FROM news_cache ORDER BY fetched_at DESC LIMIT ?', (limit,)).fetchall()
     conn.close(); return [dict(r) for r in rows]
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+import hashlib, secrets
+
+def hash_password(pw):
+    salt = secrets.token_hex(16)
+    h    = hashlib.sha256((salt + pw).encode()).hexdigest()
+    return f'{salt}:{h}'
+
+def verify_password(pw, stored):
+    try:
+        salt, h = stored.split(':')
+        return hashlib.sha256((salt + pw).encode()).hexdigest() == h
+    except: return False
+
+def init_auth():
+    conn = get_conn(); c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT)''')
+    # Default admin/admin if no users exist
+    count = c.execute('SELECT COUNT(*) as n FROM users').fetchone()['n']
+    if count == 0:
+        c.execute('INSERT INTO users (username, password_hash) VALUES (?,?)',
+                  ('admin', hash_password('admin')))
+    conn.commit(); conn.close()
+
+def check_login(username, password):
+    conn = get_conn()
+    row  = conn.execute('SELECT password_hash FROM users WHERE username=?', (username,)).fetchone()
+    conn.close()
+    if not row: return False
+    return verify_password(password, row['password_hash'])
+
+def change_password(username, new_password):
+    conn = get_conn()
+    conn.execute('UPDATE users SET password_hash=? WHERE username=?',
+                 (hash_password(new_password), username))
+    conn.commit(); conn.close()
