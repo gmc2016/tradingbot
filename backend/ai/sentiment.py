@@ -23,13 +23,15 @@ def fetch_cryptopanic_rss():
         content = re.sub(r'&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[\da-fA-F]+;)', '&amp;', content)
         import xml.etree.ElementTree as ET
         root = ET.fromstring(content.encode('utf-8'))
-        return [{'title': i.findtext('title',''), 'url': i.findtext('link',''),
-                 'source': 'CryptoPanic', 'publishedAt': i.findtext('pubDate','')}
-                for i in root.findall('.//item')[:20]]
+        items = [{'title': i.findtext('title',''), 'url': i.findtext('link',''),
+                  'source': 'CryptoPanic', 'publishedAt': i.findtext('pubDate','')}
+                 for i in root.findall('.//item')[:30]]
+        logger.info(f'RSS: fetched {len(items)} items')
+        return items
     except Exception as e:
         logger.warning(f'RSS error: {e}'); return []
 
-def fetch_newsapi(query='bitcoin OR ethereum OR crypto', page_size=20):
+def fetch_newsapi(query='bitcoin OR ethereum OR crypto OR blockchain', page_size=20):
     key = get_newsapi_key()
     if not key:
         logger.warning('NewsAPI: no key configured')
@@ -38,22 +40,44 @@ def fetch_newsapi(query='bitcoin OR ethereum OR crypto', page_size=20):
         r    = requests.get('https://newsapi.org/v2/everything', timeout=15, params={
             'q': query, 'apiKey': key, 'language': 'en',
             'sortBy': 'publishedAt', 'pageSize': page_size,
-            'from': (datetime.utcnow()-timedelta(hours=12)).strftime('%Y-%m-%dT%H:%M:%S'),
+            'from': (datetime.utcnow()-timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%S'),
         })
         data = r.json()
         if data.get('status') == 'ok':
-            articles = data.get('articles', [])
+            articles = [a for a in data.get('articles', []) if a.get('title') and a['title'] != '[Removed]']
             logger.info(f'NewsAPI: fetched {len(articles)} articles')
             return articles
         else:
             logger.warning(f'NewsAPI: {data.get("code")} - {data.get("message")}')
+            # Free tier often blocks non-developer IPs — fall through to RSS
             return []
     except Exception as e:
         logger.warning(f'NewsAPI fetch error: {e}'); return []
 
+def fetch_coindesk_rss():
+    """Additional RSS source as fallback."""
+    try:
+        r       = requests.get('https://www.coindesk.com/arc/outboundfeeds/rss/', timeout=10)
+        content = r.content.decode('utf-8', errors='replace')
+        content = re.sub(r'&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[\da-fA-F]+;)', '&amp;', content)
+        import xml.etree.ElementTree as ET
+        root  = ET.fromstring(content.encode('utf-8'))
+        items = [{'title': i.findtext('title',''), 'url': i.findtext('link',''),
+                  'source': 'CoinDesk', 'publishedAt': i.findtext('pubDate','')}
+                 for i in root.findall('.//item')[:20]]
+        logger.info(f'CoinDesk RSS: fetched {len(items)} items')
+        return items
+    except Exception as e:
+        logger.warning(f'CoinDesk RSS error: {e}'); return []
+
 def fetch_and_analyze():
     from db.database import insert_news
-    articles = fetch_newsapi() or fetch_cryptopanic_rss()
+    # Try all sources, combine results
+    articles = fetch_newsapi()
+    if not articles:
+        articles = fetch_coindesk_rss()
+    if not articles:
+        articles = fetch_cryptopanic_rss()
     if not articles:
         logger.warning('No news articles from any source')
         return
@@ -73,9 +97,10 @@ def get_pair_sentiment(pair):
     from db.database import get_news
     coin = pair.split('/')[0].upper()
     km   = {'BTC':['bitcoin','btc'],'ETH':['ethereum','eth'],
-            'BNB':['binance','bnb'],'SOL':['solana','sol'],'XRP':['ripple','xrp']}
+            'BNB':['binance','bnb'],'SOL':['solana','sol'],'XRP':['ripple','xrp'],
+            'ADA':['cardano','ada'],'DOGE':['dogecoin','doge'],'AVAX':['avalanche','avax']}
     kw     = km.get(coin, [coin.lower()])
-    news   = get_news(50)
+    news   = get_news(100)
     rel    = [n for n in news if any(k in (n['title'] or '').lower() for k in kw)]
     scores = [n['sentiment_score'] for n in (rel or news) if n['sentiment_score'] is not None]
     if not scores: return 50.0
