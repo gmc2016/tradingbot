@@ -6,24 +6,19 @@ API_KEY    = os.environ.get('BINANCE_API_KEY', '')
 API_SECRET = os.environ.get('BINANCE_API_SECRET', '')
 
 def get_exchange():
-    ex = ccxt.binance({
+    return ccxt.binance({
         'apiKey': API_KEY,
         'secret': API_SECRET,
         'enableRateLimit': True,
         'options': {
             'defaultType': 'spot',
-            'adjustForTimeDifference': True,
-            'fetchMarkets': ['spot'],
         }
     })
-    ex.options['defaultType'] = 'spot'
-    return ex
 
 def fetch_ohlcv(symbol, timeframe='1h', limit=300):
     try:
         ex  = get_exchange()
-        raw = ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit,
-                             params={'type': 'spot'})
+        raw = ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
         df  = pd.DataFrame(raw, columns=['timestamp','open','high','low','close','volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
@@ -33,16 +28,14 @@ def fetch_ohlcv(symbol, timeframe='1h', limit=300):
 
 def fetch_ticker(symbol):
     try:
-        ex = get_exchange()
-        return ex.fetch_ticker(symbol, params={'type': 'spot'})
+        return get_exchange().fetch_ticker(symbol)
     except Exception as e:
         logger.error(f'Ticker error {symbol}: {e}'); return None
 
 def get_balance():
     if not API_KEY or not API_SECRET: return {}
     try:
-        ex = get_exchange()
-        return ex.fetch_balance(params={'type': 'spot'}).get('total', {})
+        return get_exchange().fetch_balance().get('total', {})
     except Exception as e:
         logger.error(f'Balance error: {e}'); return {}
 
@@ -57,9 +50,7 @@ def place_market_order(symbol, side, quantity, mode='demo'):
     if not API_KEY or not API_SECRET:
         raise ValueError('API keys not configured')
     try:
-        ex = get_exchange()
-        return ex.create_market_order(symbol, side.lower(), quantity,
-                                      params={'type': 'spot'})
+        return get_exchange().create_market_order(symbol, side.lower(), quantity)
     except Exception as e:
         logger.error(f'Order error {symbol}: {e}'); raise
 
