@@ -74,6 +74,8 @@ def init_db():
         ('cooldown_minutes', '60'), ('trailing_stop_enabled', 'true'),
         ('partial_close_enabled', 'true'), ('max_positions', '5'),
         ('anthropic_api_key', os.environ.get('ANTHROPIC_API_KEY', '')),
+        ('ai_brain_enabled', 'false'),
+        ('brain_log', '[]'), ('last_brain_run', ''),
     ]
     for k, v in migration_defaults:
         c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (k, v))
