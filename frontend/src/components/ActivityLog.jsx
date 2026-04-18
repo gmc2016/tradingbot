@@ -42,6 +42,8 @@ export default function ActivityLog({ onClose }) {
   const [autoScroll, setAutoScroll] = useState(true)
   const [paused,     setPaused]     = useState(false)
   const [search,     setSearch]     = useState('')
+  const [dateFrom,   setDateFrom]   = useState('')
+  const [dateTo,     setDateTo]     = useState('')
   const [expanded,   setExpanded]   = useState(null)
   const bottomRef = useRef(null)
   const socketRef = useRef(null)
@@ -49,7 +51,7 @@ export default function ActivityLog({ onClose }) {
   const load = async (cat='all') => {
     try {
       const r = await axios.get('/api/activity', {
-        params: { category: cat, limit: 200 },
+        params: { category: cat, limit: 200, date_from: dateFrom||undefined, date_to: dateTo||undefined },
         withCredentials: true
       })
       setLogs(r.data.reverse()) // oldest first for display
@@ -112,6 +114,11 @@ export default function ActivityLog({ onClose }) {
           ))}
         </div>
 
+        <input type="date" value={dateFrom} onChange={e=>{setDateFrom(e.target.value);load(category)}}
+          style={{fontSize:11,padding:'3px 6px'}} title="From date"/>
+        <span style={{color:'var(--text-3)',fontSize:11}}>→</span>
+        <input type="date" value={dateTo} onChange={e=>{setDateTo(e.target.value);load(category)}}
+          style={{fontSize:11,padding:'3px 6px'}} title="To date"/>
         <div style={{flex:1,minWidth:140}}>
           <input placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)}
             style={{fontSize:11,padding:'4px 8px'}}/>
