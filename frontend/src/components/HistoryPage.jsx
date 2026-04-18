@@ -1,6 +1,18 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 
+function parseStrategy(reason) {
+  if (!reason) return { label: '--', color: 'var(--text-3)', bg: 'var(--bg-hover)' }
+  const r = reason.toLowerCase()
+  if (r.includes('donchian') && r.includes('confluence'))
+    return { label: 'Combined', color: 'var(--teal)', bg: 'rgba(20,184,166,.12)' }
+  if (r.includes('donchian'))
+    return { label: 'Donchian', color: '#a855f7', bg: 'rgba(168,85,247,.12)' }
+  if (r.includes('rsi') || r.includes('macd') || r.includes('bb') || r.includes('ema'))
+    return { label: 'RSI/MACD', color: 'var(--blue)', bg: 'var(--blue-bg)' }
+  return { label: 'Signal', color: 'var(--text-2)', bg: 'var(--bg-hover)' }
+}
+
 function formatPrice(p){ if(!p)return'—'; if(p>1000)return p.toLocaleString('en-US',{maximumFractionDigits:2}); if(p>1)return p.toFixed(4); return p.toFixed(6) }
 function formatDate(iso){ if(!iso)return'—'; const d=new Date(iso); return d.toLocaleDateString()+' '+d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'}) }
 
@@ -8,7 +20,7 @@ export default function HistoryPage({ onClose }) {
   const [trades,  setTrades]  = useState([])
   const [total,   setTotal]   = useState(0)
   const [page,    setPage]    = useState(1)
-  const [filter,  setFilter]  = useState({ status:'', pair:'' })
+  const [filter,  setFilter]  = useState({ status:'', pair:'', strategy:'' })
   const [loading, setLoading] = useState(false)
   const perPage = 50
 
@@ -19,7 +31,8 @@ export default function HistoryPage({ onClose }) {
     try {
       const params = { page, per_page: perPage }
       if (filter.status) params.status = filter.status
-      if (filter.pair)   params.pair   = filter.pair
+      if (filter.pair)     params.pair     = filter.pair
+      if (filter.strategy) params.strategy = filter.strategy
       const r = await axios.get('/api/trades/history', { params })
       setTrades(r.data.trades || [])
       setTotal(r.data.total   || 0)
@@ -65,7 +78,14 @@ export default function HistoryPage({ onClose }) {
         <input placeholder="Filter by pair (e.g. BTC/USDT)" value={filter.pair}
           onChange={e=>{ setFilter(f=>({...f,pair:e.target.value})); setPage(1) }}
           style={{width:220}}/>
-        <button onClick={()=>{ setFilter({status:'',pair:''}); setPage(1) }}
+        <select value={filter.strategy} onChange={e=>{ setFilter(f=>({...f,strategy:e.target.value})); setPage(1) }}
+          style={{width:130}}>
+          <option value=''>All strategies</option>
+          <option value='donchian'>Donchian</option>
+          <option value='rsi'>RSI/MACD</option>
+          <option value='combined'>Combined</option>
+        </select>
+        <button onClick={()=>{ setFilter({status:'',pair:'',strategy:''}); setPage(1) }}
           style={{padding:'6px 14px',border:'1px solid var(--border)',borderRadius:6,color:'var(--text-2)'}}>
           Clear
         </button>
@@ -82,14 +102,14 @@ export default function HistoryPage({ onClose }) {
           <table style={{width:'100%',borderCollapse:'collapse',marginTop:8}}>
             <thead>
               <tr style={{borderBottom:'1px solid var(--border)'}}>
-                {['Date','Pair','Side','Entry','Exit','Qty','P&L','Status','Duration','Reason'].map(h=>(
+                {['Date','Pair','Side','Entry','Exit','Qty','P&L','Status','Strategy','Duration','Reason'].map(h=>(
                   <th key={h} style={{padding:'8px 10px',textAlign:'left',fontSize:11,color:'var(--text-3)',fontWeight:500,position:'sticky',top:0,background:'var(--bg-base)',whiteSpace:'nowrap'}}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {trades.length===0?(
-                <tr><td colSpan={10} style={{padding:40,textAlign:'center',color:'var(--text-3)'}}>No trades found</td></tr>
+                <tr><td colSpan={11} style={{padding:40,textAlign:'center',color:'var(--text-3)'}}>No trades found</td></tr>
               ):trades.map(t=>{
                 const pnl      = t.pnl??t.unrealized_pnl
                 const isOpen   = t.status==='open'
@@ -116,6 +136,14 @@ export default function HistoryPage({ onClose }) {
                         color:isOpen?'var(--amber)':'var(--text-2)'}}>
                         {isOpen?'Open':'Closed'}
                       </span>
+                    </td>
+                    <td style={{padding:'7px 10px'}}>
+                      {(()=>{ const s=parseStrategy(t.strategy_reason); return (
+                        <span style={{fontSize:10,padding:'2px 7px',borderRadius:10,fontWeight:600,
+                          background:s.bg,color:s.color,whiteSpace:'nowrap'}}>
+                          {s.label}
+                        </span>
+                      )})()}
                     </td>
                     <td style={{padding:'7px 10px',fontSize:11,color:'var(--text-3)',whiteSpace:'nowrap'}}>{duration}</td>
                     <td style={{padding:'7px 10px',color:'var(--text-2)',maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontSize:12}}>{t.strategy_reason||'—'}</td>
