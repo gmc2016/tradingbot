@@ -13,6 +13,7 @@ from db.database import (init_db, init_auth, get_setting, set_setting,
                           check_login, change_password)
 from bot.engine import scan_and_trade, get_dashboard_data, start_cache_refresh, refresh_pair_cache, open_manual_trade, close_manual_trade
 from bot.scanner import run_scanner, apply_scanner_results
+from ai.brain import run_brain_cycle, apply_brain_recommendations, get_brain_log
 from bot.account import get_full_account_status
 from ai.sentiment import fetch_and_analyze
 
@@ -105,6 +106,18 @@ def scanner_cycle():
 
 # Run scanner every N hours (default 6)
 scheduler.add_job(scanner_cycle, 'interval', hours=6, id='scanner')
+
+def brain_cycle():
+    try:
+        result = run_brain_cycle()
+        if result:
+            changed = apply_brain_recommendations(result)
+            if changed:
+                refresh_pair_cache()
+                push()
+    except Exception as e: logger.error(f'Brain cycle: {e}')
+
+scheduler.add_job(brain_cycle, 'interval', minutes=30, id='brain')
 # Ensure DB is initialized before scheduler starts
 init_db(); init_auth()
 scheduler.start()
@@ -200,7 +213,7 @@ def get_settings():
             'strategy_mode','max_loss_streak','cooldown_minutes',
             'use_llm_filter','mtf_enabled',
             'scanner_enabled','scanner_interval_hours','scanner_auto_update',
-            'scanner_top_n','pinned_pairs']
+            'scanner_top_n','pinned_pairs','ai_brain_enabled']
     data = {k: _gs(k) for k in keys}
     data['binance_api_key']    = '***' if get_setting('binance_api_key')    else ''
     data['binance_api_secret'] = '***' if get_setting('binance_api_secret') else ''
@@ -216,7 +229,8 @@ def upd_settings():
               'active_pairs','starting_balance','trailing_stop_enabled','trailing_stop_pct',
               'partial_close_enabled','partial_close_at_pct','partial_close_size_pct',
               'strategy_mode','max_loss_streak','cooldown_minutes','use_llm_filter','mtf_enabled',
-              'scanner_enabled','scanner_interval_hours','scanner_auto_update','scanner_top_n','pinned_pairs']:
+              'scanner_enabled','scanner_interval_hours','scanner_auto_update','scanner_top_n','pinned_pairs',
+              'ai_brain_enabled']:
         if k in data: set_setting(k, str(data[k]))
     for k in ['binance_api_key','binance_api_secret','newsapi_key','anthropic_api_key']:
         if k in data and data[k] and data[k] != '***':
@@ -332,6 +346,29 @@ def run_scan():
             refresh_pair_cache(); push()
             return jsonify({'ok': True, 'result': result, 'active_pairs': final})
         return jsonify({'error': 'Scanner returned no results'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/brain/log')
+@login_required
+def brain_log():
+    from db.database import get_setting
+    return jsonify({
+        'log': get_brain_log(),
+        'enabled': get_setting('ai_brain_enabled') == 'true',
+        'last_run': get_setting('last_brain_run') or '',
+    })
+
+@app.route('/api/brain/run', methods=['POST'])
+@login_required
+def run_brain():
+    try:
+        result = run_brain_cycle()
+        if result:
+            changed = apply_brain_recommendations(result)
+            if changed: refresh_pair_cache(); push()
+            return jsonify({'ok': True, 'result': result, 'changed': changed})
+        return jsonify({'ok': False, 'error': 'Brain returned no result (check Anthropic key)'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
