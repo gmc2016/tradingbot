@@ -82,24 +82,27 @@ export default function AccountPage({ onClose }) {
           </Section>
 
           {/* Claude AI Usage */}
-          <Section title="Claude AI Usage (this bot)">
+          <Section title="Claude AI Usage">
             {data.llm_stats?.error ? (
               <div style={{color:'var(--text-3)',fontSize:13}}>{data.llm_stats.error}</div>
-            ) : (
-              <>
-                <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:12}}>
-                  <StatCard label="Trades filtered by AI" value={data.llm_stats?.trades_with_llm||0}/>
-                  <StatCard label="Trades blocked by AI" value={data.llm_stats?.trades_blocked_by_llm||0} color="var(--red)"/>
-                  <StatCard label="Today's AI calls" value={data.llm_stats?.today||0}/>
-                  <StatCard label="Est. cost (lifetime)" value={`$${(data.llm_stats?.estimated_cost_usd||0).toFixed(4)}`} color="var(--green)"/>
+            ) : (<>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:12}}>
+                <StatCard label="Trades filtered by AI" value={data.llm_stats?.trades_with_llm||0}/>
+                <StatCard label="Trades blocked by AI" value={data.llm_stats?.trades_blocked_by_llm||0} color="var(--red)"/>
+                <StatCard label="Today's AI calls" value={data.llm_stats?.today||0}/>
+                <StatCard label="Est. lifetime cost" value={`$${(data.llm_stats?.estimated_cost_usd||0).toFixed(4)}`} color="var(--green)"/>
+              </div>
+              <div style={{background:'rgba(168,85,247,.08)',border:'1px solid rgba(168,85,247,.2)',borderRadius:6,padding:'12px 14px',fontSize:12,color:'var(--text-2)',lineHeight:1.8}}>
+                <div style={{fontWeight:600,color:'#a855f7',marginBottom:6}}>💡 How to control costs</div>
+                <div>• <b style={{color:'var(--text)'}}>Sentiment cache:</b> LLM called max once/hour per pair — uses VADER in between (free)</div>
+                <div>• <b style={{color:'var(--text)'}}>Trade filter:</b> Only called when actually opening a trade (not on every signal scan)</div>
+                <div>• <b style={{color:'var(--text)'}}>AI Brain:</b> Once every 30 min = ~$0.003 per cycle</div>
+                <div>• <b style={{color:'var(--text)'}}>Disable LLM filter</b> in Settings → Strategy to stop trade filter calls entirely</div>
+                <div style={{marginTop:6}}>
+                  <b style={{color:'var(--text)'}}>Pricing:</b> Haiku · $0.80/M input · $0.20/M output · ~$0.00068/call
                 </div>
-                <div style={{background:'var(--bg-surface)',borderRadius:6,padding:'10px 12px',fontSize:12,color:'var(--text-2)',lineHeight:1.6}}>
-                  <div style={{marginBottom:4}}><b style={{color:'var(--text)'}}>Pricing:</b> claude-haiku-4-5 · $0.80/M input · $0.20/M output</div>
-                  <div style={{marginBottom:4}}><b style={{color:'var(--text)'}}>Per trade decision:</b> ~$0.00068 (less than 0.1 cent)</div>
-                  <div><b style={{color:'var(--text)'}}>$20 budget covers:</b> ~29,000 trade evaluations · typically 1-3 years of operation</div>
-                </div>
-              </>
-            )}
+              </div>
+            </>)}
           </Section>
 
           {/* Mode warning */}
