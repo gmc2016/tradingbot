@@ -87,6 +87,8 @@ def news_cycle():
 scheduler.add_job(bot_cycle,  'interval', minutes=5,  id='bot')
 scheduler.add_job(news_cycle, 'interval', minutes=15, id='news')
 scheduler.add_job(lambda: (refresh_pair_cache(), push()), 'interval', minutes=1, id='cache')
+# Ensure DB is initialized before scheduler starts
+init_db(); init_auth()
 scheduler.start()
 start_cache_refresh()
 eventlet.spawn_after(3, start_price_stream)
