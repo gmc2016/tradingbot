@@ -20,19 +20,48 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
   const [aiTest,       setAiTest]       = useState('')
   const [passError,    setPassError]    = useState('')
 
-  useEffect(() => {
-    // Re-fetch settings fresh so we always see real saved state
-    axios.get('/api/settings', { withCredentials:true }).then(r => {
+  const loadSettings = async () => {
+    try {
+      const r  = await axios.get('/api/settings', { withCredentials: true })
       const s  = r.data
-      const ap = Array.isArray(s.active_pairs) ? s.active_pairs.join(',') : s.active_pairs||''
-      setF(prev => ({...prev,...s, active_pairs: ap,
-        binance_api_key:    s.binance_api_key,
-        binance_api_secret: s.binance_api_secret,
-        newsapi_key:        s.newsapi_key,
-        anthropic_api_key:  s.anthropic_api_key,
+      const ap = Array.isArray(s.active_pairs) ? s.active_pairs.join(',') : (s.active_pairs||'')
+      setF(prev => ({
+        ...prev,
+        // Strategy & AI
+        strategy_mode:           s.strategy_mode          || prev.strategy_mode,
+        use_llm_filter:          s.use_llm_filter         || 'false',
+        mtf_enabled:             s.mtf_enabled            || 'false',
+        max_loss_streak:         s.max_loss_streak        || prev.max_loss_streak,
+        cooldown_minutes:        s.cooldown_minutes       || prev.cooldown_minutes,
+        // Risk
+        stop_loss_pct:           s.stop_loss_pct          || prev.stop_loss_pct,
+        take_profit_pct:         s.take_profit_pct        || prev.take_profit_pct,
+        position_size_usdt:      s.position_size_usdt     || prev.position_size_usdt,
+        max_positions:           s.max_positions          || prev.max_positions,
+        starting_balance:        s.starting_balance       || prev.starting_balance,
+        // Profit
+        trailing_stop_enabled:   s.trailing_stop_enabled  || 'false',
+        trailing_stop_pct:       s.trailing_stop_pct      || prev.trailing_stop_pct,
+        partial_close_enabled:   s.partial_close_enabled  || 'false',
+        partial_close_at_pct:    s.partial_close_at_pct   || prev.partial_close_at_pct,
+        partial_close_size_pct:  s.partial_close_size_pct || prev.partial_close_size_pct,
+        // Scanner
+        scanner_enabled:         s.scanner_enabled        || 'false',
+        scanner_auto_update:     s.scanner_auto_update    || 'false',
+        scanner_top_n:           s.scanner_top_n          || prev.scanner_top_n,
+        pinned_pairs:            s.pinned_pairs           || prev.pinned_pairs,
+        // Pairs
+        active_pairs:            ap,
+        // Keys (keep as-is from server — *** means saved)
+        binance_api_key:         s.binance_api_key,
+        binance_api_secret:      s.binance_api_secret,
+        newsapi_key:             s.newsapi_key,
+        anthropic_api_key:       s.anthropic_api_key,
       }))
-    })
-  }, [])
+    } catch(e) { console.error('Failed to load settings', e) }
+  }
+
+  useEffect(() => { loadSettings() }, [])
 
   const set    = (k, v) => setF(p => ({...p,[k]:v}))
   const toggle = (k)    => setF(p => ({...p,[k]:p[k]==='true'?'false':'true'}))
@@ -41,7 +70,11 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
   const handleSave = async () => {
     await onSave(f)
     setSaved(true)
-    setTimeout(() => { setSaved(false); onClose() }, 900)
+    setTimeout(async () => {
+      await loadSettings()  // Reload from DB to confirm saved state
+      setSaved(false)
+      onClose()
+    }, 800)
   }
 
   const handleChangePass = async () => {
@@ -312,7 +345,7 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
             </div>
           )}
 
-          {/* ACCOUNT TAB */}/* ACCOUNT TAB */}
+          {/* ACCOUNT TAB */}
           {tab==='account'&&<>
             <InfoBox>Logged in as <b>{username}</b></InfoBox>
             <Divider/>
