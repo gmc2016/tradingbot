@@ -21,6 +21,8 @@ export default function HistoryPage({ onClose }) {
   const [total,   setTotal]   = useState(0)
   const [page,    setPage]    = useState(1)
   const [filter,  setFilter]  = useState({ status:'', pair:'', strategy:'' })
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo,   setDateTo]   = useState('')
   const [loading, setLoading] = useState(false)
   const perPage = 50
 
@@ -33,6 +35,8 @@ export default function HistoryPage({ onClose }) {
       if (filter.status) params.status = filter.status
       if (filter.pair)     params.pair     = filter.pair
       if (filter.strategy) params.strategy = filter.strategy
+      if (dateFrom)         params.date_from = dateFrom
+      if (dateTo)           params.date_to   = dateTo
       const r = await axios.get('/api/trades/history', { params })
       setTrades(r.data.trades || [])
       setTotal(r.data.total   || 0)
@@ -91,7 +95,12 @@ export default function HistoryPage({ onClose }) {
           <option value='rsi'>RSI/MACD</option>
           <option value='combined'>Combined</option>
         </select>
-        <button onClick={()=>{ setFilter({status:'',pair:'',strategy:''}); setPage(1) }}
+        <input type="date" value={dateFrom} onChange={e=>{setDateFrom(e.target.value);setPage(1)}}
+          style={{fontSize:11,padding:'4px 6px',width:130}} title="From date"/>
+        <span style={{color:'var(--text-3)',fontSize:11}}>→</span>
+        <input type="date" value={dateTo} onChange={e=>{setDateTo(e.target.value);setPage(1)}}
+          style={{fontSize:11,padding:'4px 6px',width:130}} title="To date"/>
+        <button onClick={()=>{ setFilter({status:'',pair:'',strategy:''}); setDateFrom(''); setDateTo(''); setPage(1) }}
           style={{padding:'6px 14px',border:'1px solid var(--border)',borderRadius:6,color:'var(--text-2)'}}>
           Clear
         </button>
