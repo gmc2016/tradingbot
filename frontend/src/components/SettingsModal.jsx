@@ -19,6 +19,8 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
   const [passSaved,    setPassSaved]    = useState(false)
   const [aiTest,       setAiTest]       = useState('')
   const [passError,    setPassError]    = useState('')
+  const [resetDone,    setResetDone]    = useState(false)
+  const [resetError,   setResetError]   = useState('')
 
   const loadSettings = async () => {
     try {
@@ -356,6 +358,31 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
             {passError&&<div style={{fontSize:12,color:'var(--red)',marginBottom:8}}>{passError}</div>}
             <button onClick={handleChangePass} style={{padding:'7px 20px',borderRadius:6,background:passSaved?'var(--green)':'var(--blue-bg)',border:'1px solid var(--blue)',color:passSaved?'#fff':'var(--blue)',fontWeight:600,fontSize:12}}>
               {passSaved?'Password changed ✓':'Change password'}
+            </button>
+            <Divider/>
+            <SectionHead label="Demo trading"/>
+            <div style={{fontSize:12,color:'var(--text-2)',marginBottom:10,lineHeight:1.6}}>
+              Clear all paper trades and reset the demo balance back to the starting amount.
+              Useful when you want a fresh start after testing or changing strategy.
+              This only affects demo trades — live trades are never deleted.
+            </div>
+            {resetError&&<div style={{fontSize:12,color:'var(--red)',marginBottom:8}}>{resetError}</div>}
+            <button onClick={async()=>{
+              if(!window.confirm('Clear ALL demo trades and reset balance?\n\nThis cannot be undone.')) return
+              setResetError('')
+              try {
+                const r = await fetch('/api/demo/reset',{method:'POST',credentials:'include'})
+                const d = await r.json()
+                if(d.ok){ setResetDone(true); setTimeout(()=>setResetDone(false),3000) }
+                else setResetError(d.error||'Reset failed')
+              } catch(e){ setResetError('Request failed') }
+            }} style={{
+              padding:'7px 20px',borderRadius:6,fontWeight:600,fontSize:12,
+              background:resetDone?'var(--green-bg)':'var(--amber-bg)',
+              border:`1px solid ${resetDone?'var(--green-dim)':'var(--amber)'}`,
+              color:resetDone?'var(--green)':'var(--amber)',marginBottom:16,
+            }}>
+              {resetDone?'✓ Demo reset successfully':'🗑 Reset demo trades & balance'}
             </button>
             <Divider/>
             <button onClick={onLogout} style={{padding:'7px 20px',borderRadius:6,background:'var(--red-bg)',border:'1px solid var(--red-dim)',color:'var(--red)',fontWeight:600,fontSize:12}}>
