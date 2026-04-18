@@ -1,4 +1,5 @@
 import logging, threading
+from db.activitylog import log as alog
 from bot.exchange import fetch_ohlcv, fetch_ticker, place_market_order, calculate_quantity, get_balance
 from bot.strategy import generate_signal, set_cooldown, is_in_cooldown
 from ai.sentiment import get_pair_sentiment, fetch_and_analyze, llm_trade_decision
@@ -10,6 +11,23 @@ logger = logging.getLogger(__name__)
 _demo  = {'balance':1000.0,'init':False}
 _cache = {'pairs':[],'sentiments':{},'last_update':None}
 _loss_streak = {}
+# Track LLM calls in memory for cost display
+_llm_calls_today = {'count': 0, 'date': None}
+
+def increment_llm_counter():
+    from datetime import datetime, date
+    today = date.today().isoformat()
+    if _llm_calls_today['date'] != today:
+        _llm_calls_today['count'] = 0
+        _llm_calls_today['date']  = today
+    _llm_calls_today['count'] += 1
+
+def get_llm_today_count():
+    from datetime import date
+    today = date.today().isoformat()
+    if _llm_calls_today['date'] != today:
+        return 0
+    return _llm_calls_today['count']
 
 def _s(key, default):
     try:
@@ -88,6 +106,9 @@ def check_open_positions():
             if mode=='demo': adj_demo(pnl)
             closed_by='TP' if ((side=='BUY' and cp>=tp) or (side=='SELL' and cp<=tp)) else 'SL'
             logger.info(f"Closed {t['pair']} {side} {closed_by} PnL:{pnl:.2f}")
+            level = 'success' if pnl >= 0 else 'warning'
+            alog('trade', f'CLOSED {side} {t["pair"]} {closed_by} — PnL: {pnl:+.2f} USDT', level=level,
+                 detail={'pair':t['pair'],'side':side,'pnl':round(pnl,4),'closed_by':closed_by,'exit_price':cp})
             if pnl<0:
                 _loss_streak[t['pair']]=_loss_streak.get(t['pair'],0)+1
                 if _loss_streak[t['pair']]>=cfg['max_loss_streak']:
@@ -99,6 +120,7 @@ def check_open_positions():
 def scan_and_trade():
     if _s('bot_running','false')!='true': return
     cfg=get_config(); mode=cfg['mode']
+    alog('system', f'Scan cycle started — mode:{mode} strategy:{cfg["strategy"]} pairs:{len(get_pairs_list())}')
     check_open_positions()
     open_t    =get_open_trades()
     open_pairs={t['pair'] for t in open_t}
@@ -125,25 +147,28 @@ def scan_and_trade():
         indic =result.get('indicators',{})
 
         logger.info(f'{pair}: {sig} ({conf}%) {reason}')
+        alog('signal', f'{pair}: {sig} ({conf}%)', detail={'pair':pair,'signal':sig,'confidence':conf,'reason':reason,'sentiment':round(sent,1)})
 
         if sig in ('BUY','SELL') and conf>=55:
-            # LLM second opinion
+            ticker=fetch_ticker(pair)
+            if not ticker: continue
+            price=ticker['last']; pos=cfg['position_size_usdt']
+            avail=get_demo_balance() if mode=='demo' else get_balance().get('USDT',0)
+            if avail<pos: logger.warning(f'Low balance:{avail:.2f}'); continue
+
+            # LLM second opinion — only called when we actually have balance to trade
+            # This prevents wasting API calls on signals we can't act on
             if cfg['use_llm']:
                 approved,llm_reason,adj_conf=llm_trade_decision(pair,sig,conf,indic,sent,news)
                 if not approved:
                     logger.info(f'LLM rejected {pair} {sig}: {llm_reason}')
+                    alog('ai', f'Trade filter {pair} {sig}: ✗ REJECTED — {llm_reason}', level='warning')
                     continue
                 if adj_conf<50:
                     logger.info(f'LLM reduced confidence too low {pair}: {adj_conf}%')
                     continue
                 conf=adj_conf
                 reason=f'{reason} | LLM: {llm_reason}'
-
-            ticker=fetch_ticker(pair)
-            if not ticker: continue
-            price=ticker['last']; pos=cfg['position_size_usdt']
-            avail=get_demo_balance() if mode=='demo' else get_balance().get('USDT',0)
-            if avail<pos: logger.warning(f'Low balance:{avail:.2f}'); continue
             qty=calculate_quantity(pair,pos,price)
             if sl_price and tp_price: sl=sl_price; tp=tp_price
             else:
@@ -156,6 +181,8 @@ def scan_and_trade():
                 if mode=='demo': adj_demo(-pos)
                 open_cnt+=1
                 logger.info(f'Opened {sig} {pair}@{fill} SL:{sl} TP:{tp} id={tid}')
+                alog('trade', f'OPENED {sig} {pair} @ {fill:.6g}', level='success',
+                     detail={'pair':pair,'side':sig,'price':fill,'sl':sl,'tp':tp,'qty':qty,'id':tid,'mode':mode})
             except Exception as e: logger.error(f'Order failed {pair}:{e}')
 
 def open_manual_trade(pair, side, usdt_amount, sl_pct, tp_pct, mode):
@@ -238,8 +265,17 @@ def get_dashboard_data():
          'reason':'Loading...','sentiment':50,'indicators':{},'cooldown':False}
         for p in pairs_raw]
     bal=get_demo_balance() if mode=='demo' else get_balance().get('USDT',0)
+    # LLM usage stats for today
+    try:
+        llm_today = get_llm_today_count()
+        llm_cost_today = round(llm_today * 0.00068, 4)
+    except:
+        llm_today = 0; llm_cost_today = 0
+
     return {
         'mode':mode,'bot_running':_s('bot_running','false')=='true',
+        'llm_today': llm_today,
+        'llm_cost_today': llm_cost_today,
         'stats':get_stats(),'open_trades':open_t,'recent_trades':recent,
         'pairs':pair_data,'news':get_news(15),
         'sentiments':_cache.get('sentiments',{}),'usdt_balance':round(bal,2),
