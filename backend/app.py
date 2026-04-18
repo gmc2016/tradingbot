@@ -167,6 +167,29 @@ def set_mode():
     if m not in ('demo','live'): return jsonify({'error':'Invalid'}), 400
     set_setting('trading_mode', m); push(); return jsonify({'ok':True,'mode':m})
 
+# Defaults for every setting — returned when DB has None
+_SETTING_DEFAULTS = {
+    'max_positions':'5', 'stop_loss_pct':'1.5', 'take_profit_pct':'3.0',
+    'position_size_usdt':'100', 'trading_mode':'demo',
+    'active_pairs':'BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT',
+    'bot_running':'false', 'starting_balance':'1000',
+    'trailing_stop_enabled':'true', 'trailing_stop_pct':'0.8',
+    'partial_close_enabled':'true', 'partial_close_at_pct':'1.5',
+    'partial_close_size_pct':'50', 'strategy_mode':'combined',
+    'max_loss_streak':'3', 'cooldown_minutes':'60',
+    'use_llm_filter':'false', 'mtf_enabled':'false',
+    'scanner_enabled':'true', 'scanner_interval_hours':'6',
+    'scanner_auto_update':'true', 'scanner_top_n':'8',
+    'pinned_pairs':'BTC/USDT,ETH/USDT', 'last_scan_at':'',
+}
+
+def _gs(k):
+    """Safe get_setting — never returns None or the string 'None'."""
+    val = get_setting(k)
+    if val is None or val == 'None' or val == '':
+        return _SETTING_DEFAULTS.get(k, '')
+    return val
+
 @app.route('/api/settings', methods=['GET'])
 @login_required
 def get_settings():
@@ -174,14 +197,15 @@ def get_settings():
             'trading_mode','active_pairs','bot_running','starting_balance',
             'trailing_stop_enabled','trailing_stop_pct','partial_close_enabled',
             'partial_close_at_pct','partial_close_size_pct',
-            'strategy_mode','max_loss_streak','cooldown_minutes']
-    data = {k: get_setting(k) for k in keys}
+            'strategy_mode','max_loss_streak','cooldown_minutes',
+            'use_llm_filter','mtf_enabled',
+            'scanner_enabled','scanner_interval_hours','scanner_auto_update',
+            'scanner_top_n','pinned_pairs']
+    data = {k: _gs(k) for k in keys}
     data['binance_api_key']    = '***' if get_setting('binance_api_key')    else ''
     data['binance_api_secret'] = '***' if get_setting('binance_api_secret') else ''
     data['newsapi_key']        = '***' if get_setting('newsapi_key')        else ''
     data['anthropic_api_key']  = '***' if get_setting('anthropic_api_key')  else ''
-    for k in ['scanner_enabled','scanner_interval_hours','scanner_auto_update','scanner_top_n','pinned_pairs']:
-        data[k] = get_setting(k) or ''
     return jsonify(data)
 
 @app.route('/api/settings', methods=['POST'])
