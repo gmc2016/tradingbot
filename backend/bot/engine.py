@@ -24,9 +24,14 @@ def get_demo_balance():
 def adj_demo(d): _demo['balance'] += d
 
 def _s(key, default):
-    """Safe setting getter — always returns default if None or empty."""
-    val = get_setting(key)
-    return val if (val is not None and val != '') else str(default)
+    """Safe setting getter — always returns default if None, empty, or error."""
+    try:
+        val = get_setting(key)
+        if val is None or val == '' or val == 'None':
+            return str(default)
+        return val
+    except Exception:
+        return str(default)
 
 def get_config():
     return {
