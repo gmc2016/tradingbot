@@ -16,6 +16,7 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
   const [saved,        setSaved]        = useState(false)
   const [newPass,      setNewPass]      = useState('')
   const [passSaved,    setPassSaved]    = useState(false)
+  const [aiTest,       setAiTest]       = useState('')
   const [passError,    setPassError]    = useState('')
 
   useEffect(() => {
@@ -24,17 +25,17 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
       const s  = r.data
       const ap = Array.isArray(s.active_pairs) ? s.active_pairs.join(',') : s.active_pairs||''
       setF(prev => ({...prev,...s, active_pairs: ap,
-        binance_api_key:    s.binance_api_key    ==='***'?'':(s.binance_api_key||''),
-        binance_api_secret: s.binance_api_secret ==='***'?'':(s.binance_api_secret||''),
-        newsapi_key:        s.newsapi_key        ==='***'?'':(s.newsapi_key||''),
-        anthropic_api_key:  s.anthropic_api_key  ==='***'?'':(s.anthropic_api_key||''),
+        binance_api_key:    s.binance_api_key,
+        binance_api_secret: s.binance_api_secret,
+        newsapi_key:        s.newsapi_key,
+        anthropic_api_key:  s.anthropic_api_key,
       }))
     })
   }, [])
 
   const set    = (k, v) => setF(p => ({...p,[k]:v}))
   const toggle = (k)    => setF(p => ({...p,[k]:p[k]==='true'?'false':'true'}))
-  const isSet  = (k)    => config[k] === '***'
+  const isSet  = (k)    => f[k] === '***' || config[k] === '***'
 
   const handleSave = async () => {
     await onSave(f)
@@ -227,37 +228,73 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
             </Field>
           </>}
 
+          
           {/* API KEYS TAB */}
-          {tab==='keys'&&<>
-            <InfoBox>
-              API keys are stored securely in the database and survive all future updates. They are never exposed in logs.
-              <br/><br/>
-              <b>Binance keys:</b> Required only for live trading. Not needed for demo mode.<br/>
-              <b>NewsAPI key:</b> Free at newsapi.org — enables news sentiment analysis.
-            </InfoBox>
-            <div style={{display:'flex',justifyContent:'flex-end',marginBottom:12}}>
-              <button onClick={()=>setShowSecrets(s=>!s)} style={{fontSize:11,color:'var(--text-2)',border:'1px solid var(--border)',borderRadius:4,padding:'4px 10px'}}>
-                {showSecrets?'🙈 Hide keys':'👁 Show keys'}
-              </button>
+          {tab==='keys'&&(
+            <div>
+              <InfoBox>
+                API keys are stored securely in the database and survive all future updates. They are never exposed in logs.
+                <br/><br/>
+                <b>Binance keys:</b> Required only for live trading. Not needed for demo mode.<br/>
+                <b>NewsAPI key:</b> Free at newsapi.org — enables better news coverage.<br/>
+                <b>Anthropic key:</b> Enables Claude AI trade filtering and smart news analysis.
+              </InfoBox>
+              <div style={{display:'flex',justifyContent:'flex-end',marginBottom:12}}>
+                <button onClick={()=>setShowSecrets(s=>!s)} style={{fontSize:11,color:'var(--text-2)',border:'1px solid var(--border)',borderRadius:4,padding:'4px 10px'}}>
+                  {showSecrets?'🙈 Hide keys':'👁 Show keys'}
+                </button>
+              </div>
+              {[
+                ['Binance API Key',    'binance_api_key',    'Enable in Binance → API Management → Spot Trading only'],
+                ['Binance API Secret', 'binance_api_secret', 'Never share this with anyone'],
+                ['NewsAPI Key',        'newsapi_key',        'Free tier: 100 requests/day at newsapi.org'],
+                ['Anthropic API Key',  'anthropic_api_key',  'console.anthropic.com — enables Claude AI filtering'],
+              ].map(([label,key,hint])=>{
+                const saved = f[key] === '***'
+                const hasNew = f[key] && f[key] !== '***'
+                return (
+                  <Field key={key} label={label}
+                    hint={saved ? '✓ Saved' : hasNew ? 'Ready to save' : '⚠ Not set'}
+                    hintOk={saved || hasNew}>
+                    {saved && !showSecrets ? (
+                      <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                        <div style={{flex:1,padding:'6px 10px',background:'var(--bg-surface)',border:'1px solid var(--green-dim)',borderRadius:'var(--radius)',fontSize:12,color:'var(--green)',letterSpacing:2}}>
+                          ••••••••••••••••••••••••
+                        </div>
+                        <button onClick={()=>set(key,'')} style={{padding:'6px 10px',border:'1px solid var(--border)',borderRadius:'var(--radius)',fontSize:11,color:'var(--text-2)',whiteSpace:'nowrap'}}>
+                          Replace
+                        </button>
+                      </div>
+                    ) : (
+                      <input type={showSecrets ? 'text' : 'password'}
+                        placeholder="Paste key here"
+                        value={saved ? '' : (f[key] || '')}
+                        onChange={e=>set(key, e.target.value)}
+                        autoComplete="off"
+                      />
+                    )}
+                    <Hint>{hint}</Hint>
+                  </Field>
+                )
+              })}
+              <Divider/>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <button onClick={async()=>{
+                  setAiTest('Testing...')
+                  try {
+                    const r = await fetch('/api/ai/test', {credentials:'include'})
+                    const d = await r.json()
+                    setAiTest(d.ok ? '✓ '+d.message : '✗ '+d.error)
+                  } catch(e) { setAiTest('✗ Request failed') }
+                }} style={{padding:'7px 16px',borderRadius:6,background:'rgba(168,85,247,.15)',border:'1px solid rgba(168,85,247,.3)',color:'#a855f7',fontWeight:600,fontSize:12}}>
+                  🤖 Test AI connection
+                </button>
+                {aiTest&&<span style={{fontSize:12,color:aiTest.startsWith('✓')?'var(--green)':'var(--red)'}}>{aiTest}</span>}
+              </div>
             </div>
-            {[
-              ['Binance API Key',    'binance_api_key',    'Enable in Binance → API Management → Spot Trading only'],
-              ['Binance API Secret', 'binance_api_secret', 'Never share this with anyone'],
-              ['NewsAPI Key',        'newsapi_key',        'Free tier: 100 requests/day at newsapi.org'],
-              ['Anthropic API Key',  'anthropic_api_key',  'Enables Claude AI trade filtering — get key at console.anthropic.com'],
-            ].map(([label,key,hint])=>(
-              <Field key={key} label={label}
-                hint={config[key]==='***'?'✓ Currently saved':'⚠ Not yet saved'}
-                hintOk={config[key]==='***'}>
-                <input type={showSecrets?'text':'password'}
-                  placeholder={config[key]==='***'?'Leave blank to keep current value':'Paste key here'}
-                  value={f[key]} onChange={e=>set(key,e.target.value)}/>
-                <Hint>{hint}</Hint>
-              </Field>
-            ))}
-          </>}
+          )}
 
-          {/* ACCOUNT TAB */}
+          {/* ACCOUNT TAB */}/* ACCOUNT TAB */}
           {tab==='account'&&<>
             <InfoBox>Logged in as <b>{username}</b></InfoBox>
             <Divider/>
