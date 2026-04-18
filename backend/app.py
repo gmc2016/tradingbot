@@ -12,6 +12,8 @@ from db.database import (init_db, init_auth, get_setting, set_setting,
                           get_recent_trades, get_news, get_all_trades,
                           check_login, change_password)
 from bot.engine import scan_and_trade, get_dashboard_data, start_cache_refresh, refresh_pair_cache, open_manual_trade, close_manual_trade
+from bot.scanner import run_scanner, apply_scanner_results
+from bot.account import get_full_account_status
 from ai.sentiment import fetch_and_analyze
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
@@ -87,6 +89,22 @@ def news_cycle():
 scheduler.add_job(bot_cycle,  'interval', minutes=5,  id='bot')
 scheduler.add_job(news_cycle, 'interval', minutes=15, id='news')
 scheduler.add_job(lambda: (refresh_pair_cache(), push()), 'interval', minutes=1, id='cache')
+
+def scanner_cycle():
+    try:
+        from db.database import get_setting
+        if get_setting('scanner_enabled') != 'true': return
+        use_llm  = get_setting('use_llm_filter') == 'true'
+        top_n    = int(get_setting('scanner_top_n') or 8)
+        auto_upd = get_setting('scanner_auto_update') == 'true'
+        result   = run_scanner(top_n=top_n, use_llm=use_llm)
+        if result:
+            apply_scanner_results(result, auto_update=auto_upd)
+            push()
+    except Exception as e: logger.error(f'Scanner cycle: {e}')
+
+# Run scanner every N hours (default 6)
+scheduler.add_job(scanner_cycle, 'interval', hours=6, id='scanner')
 # Ensure DB is initialized before scheduler starts
 init_db(); init_auth()
 scheduler.start()
@@ -162,6 +180,8 @@ def get_settings():
     data['binance_api_secret'] = '***' if get_setting('binance_api_secret') else ''
     data['newsapi_key']        = '***' if get_setting('newsapi_key')        else ''
     data['anthropic_api_key']  = '***' if get_setting('anthropic_api_key')  else ''
+    for k in ['scanner_enabled','scanner_interval_hours','scanner_auto_update','scanner_top_n','pinned_pairs']:
+        data[k] = get_setting(k) or ''
     return jsonify(data)
 
 @app.route('/api/settings', methods=['POST'])
@@ -171,7 +191,8 @@ def upd_settings():
     for k in ['max_positions','stop_loss_pct','take_profit_pct','position_size_usdt',
               'active_pairs','starting_balance','trailing_stop_enabled','trailing_stop_pct',
               'partial_close_enabled','partial_close_at_pct','partial_close_size_pct',
-              'strategy_mode','max_loss_streak','cooldown_minutes','use_llm_filter','mtf_enabled']:
+              'strategy_mode','max_loss_streak','cooldown_minutes','use_llm_filter','mtf_enabled',
+              'scanner_enabled','scanner_interval_hours','scanner_auto_update','scanner_top_n','pinned_pairs']:
         if k in data: set_setting(k, str(data[k]))
     for k in ['binance_api_key','binance_api_secret','newsapi_key','anthropic_api_key']:
         if k in data and data[k] and data[k] != '***':
@@ -272,6 +293,40 @@ def force_close_trade(trade_id):
         return jsonify({'ok': True, 'result': result})
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+@app.route('/api/scanner/run', methods=['POST'])
+@login_required
+def run_scan():
+    try:
+        from db.database import get_setting
+        use_llm  = get_setting('use_llm_filter') == 'true'
+        top_n    = int(get_setting('scanner_top_n') or 8)
+        auto_upd = request.json.get('auto_update', get_setting('scanner_auto_update')=='true')
+        result   = run_scanner(top_n=top_n, use_llm=use_llm)
+        if result:
+            final = apply_scanner_results(result, auto_update=auto_upd)
+            refresh_pair_cache(); push()
+            return jsonify({'ok': True, 'result': result, 'active_pairs': final})
+        return jsonify({'error': 'Scanner returned no results'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/scanner/last')
+@login_required
+def last_scan():
+    from db.database import get_setting
+    import json
+    raw = get_setting('last_scan_result') or ''
+    try:
+        return jsonify({'ok': True, 'result': json.loads(raw) if raw else None,
+                        'last_scan_at': get_setting('last_scan_at')})
+    except: return jsonify({'ok': True, 'result': None})
+
+@app.route('/api/account')
+@login_required
+def account_status():
+    try: return jsonify(get_full_account_status())
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @socketio.on('connect')
 def on_connect():
