@@ -4,6 +4,7 @@ Runs every 30 minutes, analyzes performance + market, adjusts settings.
 Cost: ~$0.003 per cycle × 48 cycles/day = ~$0.14/day.
 """
 import json, requests, re, logging
+from db.activitylog import log as alog
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -201,6 +202,10 @@ Respond in JSON only:
         text   = text[start:end+1]
         result = json.loads(text)
         logger.info(f'AI Brain: {result.get("action")} — {result.get("reasoning","")}')
+        alog('brain', f'Brain cycle: {result.get("action","?")} — Market: {result.get("market_condition","?")}',
+             detail={'action':result.get('action'),'reasoning':result.get('reasoning'),
+                     'market':result.get('market_condition'),'confidence':result.get('confidence',0),
+                     'strategy':result.get('recommended_strategy'),'adjustments':result.get('adjustments',{})})
         return result
     except Exception as e:
         import traceback
@@ -260,6 +265,8 @@ def apply_brain_recommendations(result):
 
     if changes:
         logger.info(f'AI Brain applied: {", ".join(changes)}')
+        alog('settings', f'AI Brain adjusted settings: {", ".join(changes)}', level='warning',
+             detail={'changes':changes,'reasoning':result.get('reasoning'),'confidence':result.get('confidence',0)})
     return bool(changes)
 
 def get_brain_log():
