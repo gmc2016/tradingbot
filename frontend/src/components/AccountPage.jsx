@@ -81,6 +81,11 @@ export default function AccountPage({ onClose }) {
             )}
           </Section>
 
+          {/* Anthropic Balance */}
+          <Section title="Anthropic API Balance">
+            <AnthropicBalance/>
+          </Section>
+
           {/* Claude AI Usage */}
           <Section title="Claude AI Usage">
             {data.llm_stats?.error ? (
@@ -118,6 +123,38 @@ export default function AccountPage({ onClose }) {
             </div>
           )}
         </>}
+      </div>
+    </div>
+  )
+}
+
+function AnthropicBalance() {
+  const [bal, setBal] = React.useState(null)
+  const [loading, setLoading] = React.useState(false)
+
+  const check = async () => {
+    setLoading(true)
+    try {
+      const r = await fetch('/api/ai/test', {credentials:'include'})
+      const d = await r.json()
+      setBal(d)
+    } catch(e) { setBal({ok:false,error:'Request failed'}) }
+    setLoading(false)
+  }
+
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8}}>
+        <button onClick={check} disabled={loading} style={{
+          padding:'6px 16px',borderRadius:6,fontSize:12,fontWeight:600,
+          background:'rgba(168,85,247,.15)',border:'1px solid rgba(168,85,247,.3)',
+          color:'#a855f7',cursor:loading?'not-allowed':'pointer',
+        }}>{loading?'Checking...':'🤖 Check Anthropic connection'}</button>
+        {bal&&<span style={{fontSize:12,color:bal.ok?'var(--green)':'var(--red)'}}>{bal.ok?'✓ '+bal.message:'✗ '+bal.error}</span>}
+      </div>
+      <div style={{fontSize:12,color:'var(--text-3)',lineHeight:1.6}}>
+        To see your exact credit balance: <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noreferrer" style={{color:'#a855f7'}}>console.anthropic.com/settings/billing</a>
+        <br/>Your balance is visible there under "Credit balance".
       </div>
     </div>
   )
