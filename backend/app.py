@@ -1,31 +1,32 @@
 import os, sys, logging, json, threading, secrets, eventlet
-sys.path.insert(0, '/app')
+sys.path.insert(0,'/')
+sys.path.insert(0,'/app')
 eventlet.monkey_patch()
 
-from flask import Flask, jsonify, request, send_from_directory, session
+from flask import Flask, jsonify, request, send_from_directory, session, Response
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from apscheduler.schedulers.background import BackgroundScheduler
 from functools import wraps
+from datetime import datetime
 
+# ── Init DB first ──────────────────────────────────────────────────────────────
 from db.database import (init_db, init_auth, get_setting, set_setting,
                           get_recent_trades, get_news, get_all_trades,
-                          check_login, change_password)
+                          get_stats, check_login, change_password)
+from db.activitylog import init_activity_log, log as alog, set_push, get_logs
+init_db(); init_auth(); init_activity_log()
+
 from bot.engine import (scan_and_trade, get_dashboard_data, start_cache_refresh,
                          refresh_pair_cache, open_manual_trade, close_manual_trade)
 from bot.scanner import run_scanner, apply_scanner_results
+from bot.account import get_full_account_status
 from ai.sentiment import fetch_and_analyze
 from ai.brain import run_brain_cycle, apply_brain_recommendations, get_brain_log
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+logging.basicConfig(level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
-
-# ── Init DB first — before anything else ──────────────────────────────────────
-init_db()
-init_auth()
-from db.activitylog import init_activity_log, log as alog
-init_activity_log()
-alog('system', 'Trading Bot started', level='info')
 
 app = Flask(__name__, static_folder='/app/static', static_url_path='')
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET', secrets.token_hex(16))
@@ -33,92 +34,79 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE']   = False
 CORS(app, origins='*', supports_credentials=True)
 socketio = SocketIO(app, cors_allowed_origins='*', async_mode='eventlet')
+set_push(socketio.emit)
 
-# Wire live activity push to frontend
-from db.activitylog import set_push as _set_alog_push
-_set_alog_push(socketio.emit)
-
-# ── Defaults map (never return None to frontend) ───────────────────────────────
-_SETTING_DEFAULTS = {
-    'max_positions':'5', 'stop_loss_pct':'1.5', 'take_profit_pct':'3.0',
-    'position_size_usdt':'100', 'trading_mode':'demo',
-    'active_pairs':'BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT',
-    'bot_running':'false', 'starting_balance':'1000',
-    'trailing_stop_enabled':'true', 'trailing_stop_pct':'0.8',
-    'partial_close_enabled':'true', 'partial_close_at_pct':'1.5',
-    'partial_close_size_pct':'50', 'strategy_mode':'combined',
-    'max_loss_streak':'3', 'cooldown_minutes':'60',
-    'use_llm_filter':'false', 'mtf_enabled':'false',
-    'scanner_enabled':'true', 'scanner_interval_hours':'6',
-    'scanner_auto_update':'true', 'scanner_top_n':'8',
-    'pinned_pairs':'BTC/USDT,ETH/USDT', 'last_scan_at':'',
-    'ai_brain_enabled':'false', 'last_brain_run':'',
+_DEFAULTS = {
+    'max_positions':'5','stop_loss_pct':'1.5','take_profit_pct':'3.0',
+    'position_size_usdt':'100','trading_mode':'demo',
+    'active_pairs':'BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,XRP/USDT',
+    'bot_running':'false','starting_balance':'1000',
+    'trailing_stop_enabled':'true','trailing_stop_pct':'0.8',
+    'partial_close_enabled':'true','partial_close_at_pct':'1.5',
+    'partial_close_size_pct':'50','strategy_mode':'combined',
+    'max_loss_streak':'3','cooldown_minutes':'60',
+    'use_llm_filter':'false','mtf_enabled':'false',
+    'scanner_enabled':'true','scanner_interval_hours':'6',
+    'scanner_auto_update':'true','scanner_top_n':'8',
+    'pinned_pairs':'BTC/USDT,ETH/USDT','last_scan_at':'',
+    'ai_brain_enabled':'false','last_brain_run':'',
 }
-
 def _gs(k):
     val = get_setting(k)
-    if val is None or val == 'None' or val == '':
-        return _SETTING_DEFAULTS.get(k, '')
-    return val
+    return val if (val is not None and val not in ('','None')) else _DEFAULTS.get(k,'')
 
-# ── Auth decorator ─────────────────────────────────────────────────────────────
 def login_required(f):
     @wraps(f)
-    def decorated(*args, **kwargs):
+    def dec(*a,**kw):
         if not session.get('logged_in'):
-            return jsonify({'error': 'Unauthorized', 'login_required': True}), 401
-        return f(*args, **kwargs)
-    return decorated
+            return jsonify({'error':'Unauthorized','login_required':True}),401
+        return f(*a,**kw)
+    return dec
 
 # ── Price stream ───────────────────────────────────────────────────────────────
-_prices    = {}
-_ws_thread = None
+_prices = {}; _ws_thread = None
 
 def start_price_stream():
     global _ws_thread
     if _ws_thread and _ws_thread.is_alive(): return
     def run():
         import websocket as ws_lib
-        def build_url():
-            raw = get_setting('active_pairs') or 'BTC/USDT,ETH/USDT'
-            streams = '/'.join([p.strip().replace('/','').lower()+'@miniTicker'
-                                for p in raw.split(',')])
+        def url():
+            raw=get_setting('active_pairs') or 'BTC/USDT,ETH/USDT'
+            streams='/'.join([p.strip().replace('/','').lower()+'@miniTicker'
+                              for p in raw.split(',')])
             return f'wss://stream.binance.com:9443/stream?streams={streams}'
-        def on_message(ws, message):
+        def on_msg(ws,msg):
             try:
-                data   = json.loads(message); t = data.get('data', {})
-                sym    = t.get('s', '')
+                t=json.loads(msg).get('data',{})
+                sym=t.get('s',''); price=float(t.get('c',0))
                 if not sym: return
-                pair   = sym[:-4]+'/USDT' if sym.endswith('USDT') else sym
-                price  = float(t.get('c', 0))
-                open_p = float(t.get('o', price))
-                change = round(((price-open_p)/open_p*100) if open_p else 0, 2)
-                _prices[pair] = {'price': price, 'change': change}
-                socketio.emit('price_update', {'pair': pair, 'price': price, 'change': change})
+                pair=sym[:-4]+'/USDT' if sym.endswith('USDT') else sym
+                open_p=float(t.get('o',price))
+                chg=round(((price-open_p)/open_p*100) if open_p else 0,2)
+                _prices[pair]={'price':price,'change':chg}
+                socketio.emit('price_update',{'pair':pair,'price':price,'change':chg})
             except: pass
-        def on_error(ws, e): logger.warning(f'WS: {e}')
-        def on_close(ws, *a): eventlet.sleep(5); run()
-        def on_open(ws): logger.info('Price stream connected')
+        def on_close(ws,*a): eventlet.sleep(5); run()
         try:
-            ws_lib.WebSocketApp(build_url(), on_message=on_message,
-                on_error=on_error, on_close=on_close,
-                on_open=on_open).run_forever(ping_interval=20)
-        except Exception as e: logger.error(f'WS failed: {e}')
-    _ws_thread = threading.Thread(target=run, daemon=True)
-    _ws_thread.start()
+            ws_lib.WebSocketApp(url(),on_message=on_msg,
+                on_error=lambda ws,e:None,on_close=on_close,
+                on_open=lambda ws:logger.info('Price stream connected')).run_forever(ping_interval=20)
+        except Exception as e: logger.error(f'WS: {e}')
+    _ws_thread=threading.Thread(target=run,daemon=True); _ws_thread.start()
 
-# ── Scheduler cycle functions ──────────────────────────────────────────────────
+# ── Scheduler ─────────────────────────────────────────────────────────────────
 def push():
-    try: socketio.emit('dashboard_update', get_dashboard_data())
+    try: socketio.emit('dashboard_update',get_dashboard_data())
     except Exception as e: logger.error(f'Push: {e}')
 
 def bot_cycle():
     try: scan_and_trade(); refresh_pair_cache(); push()
-    except Exception as e: logger.error(f'Bot cycle: {e}')
+    except Exception as e: logger.error(f'Bot: {e}')
 
 def news_cycle():
     try: fetch_and_analyze(); push()
-    except Exception as e: logger.error(f'News cycle: {e}')
+    except Exception as e: logger.error(f'News: {e}')
 
 def cache_cycle():
     try: refresh_pair_cache(); push()
@@ -126,152 +114,134 @@ def cache_cycle():
 
 def scanner_cycle():
     try:
-        if _gs('scanner_enabled') != 'true': return
-        result = run_scanner(top_n=int(_gs('scanner_top_n') or 8),
-                             use_llm=_gs('use_llm_filter')=='true')
+        if _gs('scanner_enabled')!='true': return
+        result=run_scanner(top_n=int(_gs('scanner_top_n') or 8),
+                           use_llm=_gs('use_llm_filter')=='true')
         if result:
-            apply_scanner_results(result, auto_update=_gs('scanner_auto_update')=='true')
+            apply_scanner_results(result,auto_update=_gs('scanner_auto_update')=='true')
             push()
     except Exception as e: logger.error(f'Scanner: {e}')
 
 def brain_cycle():
     try:
-        if _gs('ai_brain_enabled') != 'true': return
-        result = run_brain_cycle()
+        if _gs('ai_brain_enabled')!='true': return
+        result=run_brain_cycle()
         if result:
-            changed = apply_brain_recommendations(result)
+            changed=apply_brain_recommendations(result)
             if changed: refresh_pair_cache(); push()
     except Exception as e: logger.error(f'Brain: {e}')
 
-# ── Start scheduler ────────────────────────────────────────────────────────────
 scheduler = BackgroundScheduler()
-scheduler.add_job(bot_cycle,     'interval', minutes=5,   id='bot',
-                  max_instances=1, misfire_grace_time=60)
-scheduler.add_job(news_cycle,    'interval', minutes=15,  id='news',
-                  max_instances=1, misfire_grace_time=120)
-scheduler.add_job(cache_cycle,   'interval', minutes=1,   id='cache',
-                  max_instances=1, misfire_grace_time=30)
-scheduler.add_job(scanner_cycle, 'interval', hours=6,     id='scanner',
-                  max_instances=1, misfire_grace_time=300)
-scheduler.add_job(brain_cycle,   'interval', minutes=30,  id='brain',
-                  max_instances=1, misfire_grace_time=120)
+scheduler.add_job(bot_cycle,    'interval',minutes=5,  id='bot',    max_instances=1,misfire_grace_time=60)
+scheduler.add_job(news_cycle,   'interval',minutes=15, id='news',   max_instances=1,misfire_grace_time=120)
+scheduler.add_job(cache_cycle,  'interval',minutes=1,  id='cache',  max_instances=1,misfire_grace_time=30)
+scheduler.add_job(scanner_cycle,'interval',hours=6,    id='scanner',max_instances=1,misfire_grace_time=300)
+scheduler.add_job(brain_cycle,  'interval',minutes=30, id='brain',  max_instances=1,misfire_grace_time=120)
 scheduler.start()
-
 start_cache_refresh()
 eventlet.spawn_after(3, start_price_stream)
+alog('system','Trading Bot started')
+logger.info('Trading Bot ready')
 
-logger.info('Trading Bot backend ready')
-
-# ── Auth routes ────────────────────────────────────────────────────────────────
-@app.route('/api/auth/login', methods=['POST'])
+# ── Auth ───────────────────────────────────────────────────────────────────────
+@app.route('/api/auth/login',methods=['POST'])
 def login():
-    data = request.json or {}
-    if check_login(data.get('username',''), data.get('password','')):
-        session['logged_in'] = True
-        session['username']  = data['username']
-        return jsonify({'ok': True, 'username': data['username']})
-    return jsonify({'error': 'Invalid username or password'}), 401
+    d=request.json or {}
+    if check_login(d.get('username',''),d.get('password','')):
+        session['logged_in']=True; session['username']=d['username']
+        return jsonify({'ok':True,'username':d['username']})
+    return jsonify({'error':'Invalid credentials'}),401
 
-@app.route('/api/auth/logout', methods=['POST'])
-def logout():
-    session.clear()
-    return jsonify({'ok': True})
+@app.route('/api/auth/logout',methods=['POST'])
+def logout(): session.clear(); return jsonify({'ok':True})
 
 @app.route('/api/auth/status')
 def auth_status():
-    return jsonify({'logged_in': bool(session.get('logged_in')),
-                    'username':  session.get('username','')})
+    return jsonify({'logged_in':bool(session.get('logged_in')),'username':session.get('username','')})
 
-@app.route('/api/auth/change_password', methods=['POST'])
+@app.route('/api/auth/change_password',methods=['POST'])
 @login_required
 def do_change_password():
-    change_password(session['username'], request.json.get('new_password',''))
-    return jsonify({'ok': True})
+    change_password(session['username'],request.json.get('new_password',''))
+    return jsonify({'ok':True})
 
 # ── SPA ────────────────────────────────────────────────────────────────────────
 @app.route('/')
 @app.route('/<path:path>')
-def spa(path=None): return send_from_directory('/app/static', 'index.html')
+def spa(path=None): return send_from_directory('/app/static','index.html')
 
-# ── Dashboard ──────────────────────────────────────────────────────────────────
 @app.route('/api/status')
-def status(): return jsonify({'ok': True})
+def status(): return jsonify({'ok':True})
 
+# ── Dashboard & Bot ────────────────────────────────────────────────────────────
 @app.route('/api/dashboard')
 @login_required
 def dashboard():
     try: return jsonify(get_dashboard_data())
-    except Exception as e: return jsonify({'error': str(e)}), 500
+    except Exception as e: return jsonify({'error':str(e)}),500
 
-# ── Bot control ────────────────────────────────────────────────────────────────
-@app.route('/api/bot/start', methods=['POST'])
+@app.route('/api/bot/start',methods=['POST'])
 @login_required
-def start(): set_setting('bot_running','true');  push(); return jsonify({'ok':True})
+def start(): set_setting('bot_running','true'); push(); return jsonify({'ok':True})
 
-@app.route('/api/bot/stop', methods=['POST'])
+@app.route('/api/bot/stop',methods=['POST'])
 @login_required
 def stop(): set_setting('bot_running','false'); push(); return jsonify({'ok':True})
 
-@app.route('/api/bot/mode', methods=['POST'])
+@app.route('/api/bot/mode',methods=['POST'])
 @login_required
 def set_mode():
-    m = request.json.get('mode','demo')
-    if m not in ('demo','live'): return jsonify({'error':'Invalid'}), 400
-    set_setting('trading_mode', m); push(); return jsonify({'ok':True,'mode':m})
+    m=request.json.get('mode','demo')
+    if m not in ('demo','live'): return jsonify({'error':'Invalid'}),400
+    set_setting('trading_mode',m); push(); return jsonify({'ok':True,'mode':m})
 
-@app.route('/api/bot/run_now', methods=['POST'])
+@app.route('/api/bot/run_now',methods=['POST'])
 @login_required
 def run_now():
     try: scan_and_trade(); refresh_pair_cache(); push(); return jsonify({'ok':True})
-    except Exception as e: return jsonify({'error':str(e)}), 500
+    except Exception as e: return jsonify({'error':str(e)}),500
 
 # ── Settings ───────────────────────────────────────────────────────────────────
-@app.route('/api/settings', methods=['GET'])
+@app.route('/api/settings',methods=['GET'])
 @login_required
 def get_settings():
-    keys = ['max_positions','stop_loss_pct','take_profit_pct','position_size_usdt',
-            'trading_mode','active_pairs','bot_running','starting_balance',
-            'trailing_stop_enabled','trailing_stop_pct','partial_close_enabled',
-            'partial_close_at_pct','partial_close_size_pct',
-            'strategy_mode','max_loss_streak','cooldown_minutes',
-            'use_llm_filter','mtf_enabled',
-            'scanner_enabled','scanner_interval_hours','scanner_auto_update',
-            'scanner_top_n','pinned_pairs','ai_brain_enabled']
-    data = {k: _gs(k) for k in keys}
-    data['binance_api_key']    = '***' if get_setting('binance_api_key')    else ''
-    data['binance_api_secret'] = '***' if get_setting('binance_api_secret') else ''
-    data['newsapi_key']        = '***' if get_setting('newsapi_key')        else ''
-    data['anthropic_api_key']  = '***' if get_setting('anthropic_api_key')  else ''
+    keys=['max_positions','stop_loss_pct','take_profit_pct','position_size_usdt',
+          'trading_mode','active_pairs','bot_running','starting_balance',
+          'trailing_stop_enabled','trailing_stop_pct','partial_close_enabled',
+          'partial_close_at_pct','partial_close_size_pct',
+          'strategy_mode','max_loss_streak','cooldown_minutes',
+          'use_llm_filter','mtf_enabled',
+          'scanner_enabled','scanner_interval_hours','scanner_auto_update',
+          'scanner_top_n','pinned_pairs','ai_brain_enabled']
+    data={k:_gs(k) for k in keys}
+    data['binance_api_key']   ='***' if get_setting('binance_api_key')    else ''
+    data['binance_api_secret']='***' if get_setting('binance_api_secret') else ''
+    data['newsapi_key']       ='***' if get_setting('newsapi_key')        else ''
+    data['anthropic_api_key'] ='***' if get_setting('anthropic_api_key')  else ''
     return jsonify(data)
 
-@app.route('/api/settings', methods=['POST'])
+@app.route('/api/settings',methods=['POST'])
 @login_required
 def upd_settings():
-    data = request.json or {}
-    safe_keys = ['max_positions','stop_loss_pct','take_profit_pct','position_size_usdt',
-                 'active_pairs','starting_balance','trailing_stop_enabled','trailing_stop_pct',
-                 'partial_close_enabled','partial_close_at_pct','partial_close_size_pct',
-                 'strategy_mode','max_loss_streak','cooldown_minutes','use_llm_filter',
-                 'mtf_enabled','scanner_enabled','scanner_interval_hours',
-                 'scanner_auto_update','scanner_top_n','pinned_pairs','ai_brain_enabled']
-    from db.activitylog import log as alog
-    changed = []
-    for k in safe_keys:
+    data=request.json or {}
+    safe=['max_positions','stop_loss_pct','take_profit_pct','position_size_usdt',
+          'active_pairs','starting_balance','trailing_stop_enabled','trailing_stop_pct',
+          'partial_close_enabled','partial_close_at_pct','partial_close_size_pct',
+          'strategy_mode','max_loss_streak','cooldown_minutes','use_llm_filter',
+          'mtf_enabled','scanner_enabled','scanner_interval_hours','scanner_auto_update',
+          'scanner_top_n','pinned_pairs','ai_brain_enabled']
+    changed=[]
+    for k in safe:
         if k in data:
-            old_val = get_setting(k)
-            new_val = str(data[k])
-            if old_val != new_val:
-                set_setting(k, new_val)
-                changed.append(f'{k}: {old_val}→{new_val}')
+            old=get_setting(k); new=str(data[k])
+            if old!=new: set_setting(k,new); changed.append(f'{k}:{old}→{new}')
     for k in ['binance_api_key','binance_api_secret','newsapi_key','anthropic_api_key']:
-        if k in data and data[k] and data[k] != '***':
-            set_setting(k, str(data[k]))
-            changed.append(f'{k}: updated')
-            logger.info(f'Saved {k}')
+        if k in data and data[k] and data[k]!='***':
+            set_setting(k,str(data[k])); changed.append(f'{k}:updated')
     if changed:
-        alog('settings', f'Settings changed by user: {", ".join(changed[:5])}{"..." if len(changed)>5 else ""}',
-             level='info', detail={'changes': changed})
-    return jsonify({'ok': True})
+        alog('settings',f'Settings changed: {", ".join(changed[:6])}{"..." if len(changed)>6 else ""}',
+             detail={'changes':changed})
+    return jsonify({'ok':True})
 
 # ── Trades ─────────────────────────────────────────────────────────────────────
 @app.route('/api/trades')
@@ -286,78 +256,75 @@ def trade_history():
         per_page=int(request.args.get('per_page',50)),
         pair=request.args.get('pair'),
         status=request.args.get('status'),
-        strategy=request.args.get('strategy')))
+        strategy=request.args.get('strategy'),
+        date_from=request.args.get('date_from'),
+        date_to=request.args.get('date_to')))
 
-@app.route('/api/trade/manual', methods=['POST'])
+@app.route('/api/trade/manual',methods=['POST'])
 @login_required
 def manual_trade():
-    data = request.json or {}
+    d=request.json or {}
     try:
-        mode   = _gs('trading_mode')
-        result = open_manual_trade(
-            pair=data['pair'], side=data['side'],
-            usdt_amount=float(data.get('usdt_amount',100)),
-            sl_pct=float(data.get('sl_pct',1.5)),
-            tp_pct=float(data.get('tp_pct',3.0)),
-            mode=mode)
+        result=open_manual_trade(pair=d['pair'],side=d['side'],
+            usdt_amount=float(d.get('usdt_amount',100)),
+            sl_pct=float(d.get('sl_pct',1.5)),tp_pct=float(d.get('tp_pct',3.0)),
+            mode=_gs('trading_mode'))
         refresh_pair_cache(); push()
         return jsonify({'ok':True,'trade':result})
-    except Exception as e: return jsonify({'error':str(e)}), 400
+    except Exception as e: return jsonify({'error':str(e)}),400
 
-@app.route('/api/trade/close/<int:trade_id>', methods=['POST'])
+@app.route('/api/trade/close/<int:trade_id>',methods=['POST'])
 @login_required
-def force_close_trade(trade_id):
+def force_close(trade_id):
     try:
-        result = close_manual_trade(trade_id)
-        refresh_pair_cache(); push()
+        result=close_manual_trade(trade_id); refresh_pair_cache(); push()
         return jsonify({'ok':True,'result':result})
-    except Exception as e: return jsonify({'error':str(e)}), 400
+    except Exception as e: return jsonify({'error':str(e)}),400
 
 # ── News ───────────────────────────────────────────────────────────────────────
 @app.route('/api/news')
 @login_required
 def news(): return jsonify(get_news(20))
 
-@app.route('/api/news/refresh', methods=['POST'])
+@app.route('/api/news/refresh',methods=['POST'])
 @login_required
 def ref_news(): fetch_and_analyze(); push(); return jsonify({'ok':True})
 
-# ── OHLCV ──────────────────────────────────────────────────────────────────────
 @app.route('/api/ohlcv')
 @login_required
 def ohlcv():
     from bot.exchange import fetch_ohlcv
-    df = fetch_ohlcv(request.args.get('symbol','BTC/USDT'),
-                     request.args.get('timeframe','1h'),
-                     int(request.args.get('limit',100)))
-    if df is None: return jsonify({'error':'Failed'}), 500
-    df = df.reset_index(); df['timestamp'] = df['timestamp'].astype(str)
+    df=fetch_ohlcv(request.args.get('symbol','BTC/USDT'),
+                   request.args.get('timeframe','1h'),
+                   int(request.args.get('limit',100)))
+    if df is None: return jsonify({'error':'Failed'}),500
+    df=df.reset_index(); df['timestamp']=df['timestamp'].astype(str)
     return jsonify(df.to_dict(orient='records'))
 
-# ── Prices ─────────────────────────────────────────────────────────────────────
 @app.route('/api/prices')
 def get_prices(): return jsonify(_prices)
 
 # ── Scanner ────────────────────────────────────────────────────────────────────
-@app.route('/api/scanner/run', methods=['POST'])
+@app.route('/api/scanner/run',methods=['POST'])
 @login_required
 def run_scan():
     try:
-        auto_upd = request.json.get('auto_update', _gs('scanner_auto_update')=='true') if request.json else _gs('scanner_auto_update')=='true'
-        result   = run_scanner(top_n=int(_gs('scanner_top_n') or 8),
-                               use_llm=_gs('use_llm_filter')=='true')
+        d=request.json or {}
+        auto_upd=d.get('auto_update',_gs('scanner_auto_update')=='true')
+        result=run_scanner(top_n=int(_gs('scanner_top_n') or 8),
+                           use_llm=_gs('use_llm_filter')=='true')
         if result:
-            final = apply_scanner_results(result, auto_update=auto_upd)
+            final=apply_scanner_results(result,auto_update=auto_upd)
             refresh_pair_cache(); push()
             return jsonify({'ok':True,'result':result,'active_pairs':final})
-        return jsonify({'error':'Scanner returned no results'}), 500
+        return jsonify({'error':'Scanner returned no results'}),500
     except Exception as e:
-        logger.error(f'Scanner run: {e}'); return jsonify({'error':str(e)}), 500
+        logger.error(f'Scanner: {e}'); return jsonify({'error':str(e)}),500
 
 @app.route('/api/scanner/last')
 @login_required
 def last_scan():
-    raw = get_setting('last_scan_result') or ''
+    raw=get_setting('last_scan_result') or ''
     try: return jsonify({'ok':True,'result':json.loads(raw) if raw else None,
                          'last_scan_at':get_setting('last_scan_at')})
     except: return jsonify({'ok':True,'result':None})
@@ -365,240 +332,198 @@ def last_scan():
 # ── AI Brain ───────────────────────────────────────────────────────────────────
 @app.route('/api/brain/log')
 @login_required
-def brain_log_route():
-    return jsonify({'log':get_brain_log(),
-                    'enabled':_gs('ai_brain_enabled')=='true',
+def brain_log():
+    return jsonify({'log':get_brain_log(),'enabled':_gs('ai_brain_enabled')=='true',
                     'last_run':get_setting('last_brain_run') or ''})
 
-@app.route('/api/brain/run', methods=['POST'])
+@app.route('/api/brain/run',methods=['POST'])
 @login_required
 def run_brain():
     try:
-        result = run_brain_cycle()
+        result=run_brain_cycle()
         if result:
-            changed = apply_brain_recommendations(result)
+            changed=apply_brain_recommendations(result)
             if changed: refresh_pair_cache(); push()
             return jsonify({'ok':True,'result':result,'changed':changed})
-        return jsonify({'ok':False,'error':'Brain returned no result — check Anthropic API key in Settings'})
+        return jsonify({'ok':False,'error':'Brain returned no result — check Anthropic API key'})
     except Exception as e:
-        logger.error(f'Brain run: {e}'); return jsonify({'error':str(e)}), 500
+        logger.error(f'Brain: {e}'); return jsonify({'error':str(e)}),500
 
 # ── Account ────────────────────────────────────────────────────────────────────
 @app.route('/api/account')
 @login_required
-def account_status():
-    from bot.account import get_full_account_status
+def account():
     try: return jsonify(get_full_account_status())
-    except Exception as e: return jsonify({'error':str(e)}), 500
+    except Exception as e: return jsonify({'error':str(e)}),500
 
-# ── AI test ────────────────────────────────────────────────────────────────────
 @app.route('/api/ai/test')
 @login_required
 def test_ai():
-    key = get_setting('anthropic_api_key') or ''
+    key=get_setting('anthropic_api_key') or ''
     if not key: return jsonify({'ok':False,'error':'No Anthropic API key saved'})
     try:
         import requests as req
-        r = req.post('https://api.anthropic.com/v1/messages',
+        r=req.post('https://api.anthropic.com/v1/messages',
             headers={'x-api-key':key,'anthropic-version':'2023-06-01',
                      'content-type':'application/json'},
             json={'model':'claude-haiku-4-5-20251001','max_tokens':30,
-                  'messages':[{'role':'user','content':'Reply with just: OK'}]},
-            timeout=10)
-        if r.status_code == 200:
-            text = r.json().get('content',[{}])[0].get('text','')
-            return jsonify({'ok':True,'message':f'AI working — {text.strip()}'})
-        return jsonify({'ok':False,'error':f'HTTP {r.status_code}: {r.text[:100]}'})
+                  'messages':[{'role':'user','content':'Reply OK only'}]},timeout=10)
+        if r.status_code==200:
+            text=r.json().get('content',[{}])[0].get('text','')
+            return jsonify({'ok':True,'message':f'Connected — {text.strip()}'})
+        return jsonify({'ok':False,'error':f'HTTP {r.status_code}'})
     except Exception as e: return jsonify({'ok':False,'error':str(e)})
 
-# ── Demo reset ─────────────────────────────────────────────────────────────────
+# ── Activity log ───────────────────────────────────────────────────────────────
 @app.route('/api/activity')
 @login_required
-def activity_log():
-    from db.activitylog import get_logs
-    category = request.args.get('category', 'all')
-    limit    = int(request.args.get('limit', 100))
-    return jsonify(get_logs(limit=limit, category=category))
+def activity():
+    return jsonify(get_logs(
+        limit=int(request.args.get('limit',100)),
+        category=request.args.get('category','all'),
+        date_from=request.args.get('date_from'),
+        date_to=request.args.get('date_to')))
 
-@app.route('/api/export/trades')
-@login_required
-def export_trades():
-    """Export all trades as CSV."""
-    import csv, io
-    from db.database import get_conn
-    conn = get_conn()
-    rows = conn.execute('''
-        SELECT id, mode, pair, side, entry_price, exit_price, quantity,
-               pnl, status, strategy_reason, stop_loss, take_profit,
-               opened_at, closed_at, order_id
-        FROM trades ORDER BY opened_at DESC
-    ''').fetchall()
-    conn.close()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['ID','Mode','Pair','Side','Entry','Exit','Qty','PnL',
-                     'Status','Strategy','SL','TP','Opened','Closed','OrderID'])
-    for r in rows:
-        writer.writerow([
-            r['id'], r['mode'], r['pair'], r['side'],
-            r['entry_price'], r['exit_price'] or '', r['quantity'],
-            round(r['pnl'] or 0, 4), r['status'], r['strategy_reason'] or '',
-            r['stop_loss'], r['take_profit'],
-            r['opened_at'], r['closed_at'] or '', r['order_id'] or ''
-        ])
-    from flask import Response
-    return Response(
-        output.getvalue(),
-        mimetype='text/csv',
-        headers={'Content-Disposition': 'attachment; filename=tradingbot_trades.csv'}
-    )
-
-@app.route('/api/export/activity')
-@login_required
-def export_activity():
-    """Export activity log as CSV."""
-    import csv, io, json
-    from db.activitylog import get_logs
-    logs = get_logs(limit=1000, category='all')
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['ID','Timestamp','Category','Level','Message','Detail'])
-    for entry in reversed(logs):
-        detail = ''
-        try:
-            if entry.get('detail'):
-                d = json.loads(entry['detail'])
-                detail = ' | '.join(f'{k}={v}' for k,v in d.items())
-        except: pass
-        writer.writerow([
-            entry.get('id',''), entry.get('ts',''),
-            entry.get('category',''), entry.get('level',''),
-            entry.get('message',''), detail
-        ])
-    from flask import Response
-    return Response(
-        output.getvalue(),
-        mimetype='text/csv',
-        headers={'Content-Disposition': 'attachment; filename=tradingbot_activity.csv'}
-    )
-
-@app.route('/api/export/summary')
-@login_required
-def export_summary():
-    """Export a full JSON summary — trades + stats + settings + activity.
-    Paste this into Claude for analysis."""
-    import json
-    from db.database import get_conn, get_stats, get_setting
-    from db.activitylog import get_logs
-
-    conn = get_conn()
-
-    # All closed trades
-    trades = [dict(r) for r in conn.execute(
-        "SELECT * FROM trades WHERE status='closed' ORDER BY opened_at"
-    ).fetchall()]
-
-    # Open trades
-    open_trades = [dict(r) for r in conn.execute(
-        "SELECT * FROM trades WHERE status='open'"
-    ).fetchall()]
-
-    # Per-pair stats
-    pair_stats = [dict(r) for r in conn.execute('''
-        SELECT pair,
-               COUNT(*) as total,
-               SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins,
-               SUM(CASE WHEN pnl<0 THEN 1 ELSE 0 END) as losses,
-               ROUND(AVG(pnl),4) as avg_pnl,
-               ROUND(SUM(pnl),4) as total_pnl,
-               ROUND(MAX(pnl),4) as best_trade,
-               ROUND(MIN(pnl),4) as worst_trade
-        FROM trades WHERE status='closed'
-        GROUP BY pair ORDER BY total_pnl DESC
-    ''').fetchall()]
-
-    # Per-strategy stats
-    strategy_stats = [dict(r) for r in conn.execute('''
-        SELECT
-            CASE
-                WHEN strategy_reason LIKE '%Donchian%' THEN 'Donchian'
-                WHEN strategy_reason LIKE '%MTF%' THEN 'MTF'
-                WHEN strategy_reason LIKE '%EMA%cross%' THEN 'EMA Cross'
-                WHEN strategy_reason LIKE '%Manual%' THEN 'Manual'
-                ELSE 'RSI/MACD/BB'
-            END as strategy,
-            COUNT(*) as total,
-            SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins,
-            ROUND(SUM(pnl),4) as total_pnl,
-            ROUND(AVG(pnl),4) as avg_pnl
-        FROM trades WHERE status='closed'
-        GROUP BY strategy ORDER BY total_pnl DESC
-    ''').fetchall()]
-
-    # Daily P&L
-    daily = [dict(r) for r in conn.execute('''
-        SELECT date(closed_at) as date,
-               COUNT(*) as trades,
-               SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins,
-               ROUND(SUM(pnl),4) as pnl
-        FROM trades WHERE status='closed'
-        GROUP BY date(closed_at) ORDER BY date
-    ''').fetchall()]
-
-    conn.close()
-
-    # Current settings
-    setting_keys = ['strategy_mode','stop_loss_pct','take_profit_pct','position_size_usdt',
-                    'max_positions','trailing_stop_enabled','trailing_stop_pct',
-                    'partial_close_enabled','partial_close_at_pct','partial_close_size_pct',
-                    'use_llm_filter','mtf_enabled','ai_brain_enabled','trading_mode']
-    settings = {k: get_setting(k) for k in setting_keys}
-
-    # Recent brain decisions
-    brain_log = get_logs(limit=20, category='brain')
-
-    summary = {
-        'exported_at':    datetime.utcnow().isoformat(),
-        'overall_stats':  get_stats(),
-        'settings':       settings,
-        'pair_stats':     pair_stats,
-        'strategy_stats': strategy_stats,
-        'daily_pnl':      daily,
-        'open_trades':    open_trades,
-        'closed_trades':  trades,
-        'brain_log':      brain_log,
-    }
-
-    return Response(
-        json.dumps(summary, indent=2, default=str),
-        mimetype='application/json',
-        headers={'Content-Disposition': 'attachment; filename=tradingbot_summary.json'}
-    )
-
-@app.route('/api/demo/reset', methods=['POST'])
+# ── Demo reset ─────────────────────────────────────────────────────────────────
+@app.route('/api/demo/reset',methods=['POST'])
 @login_required
 def reset_demo():
     try:
         from db.database import get_conn
         from bot.engine import _demo
-        conn    = get_conn()
-        deleted = conn.execute("DELETE FROM trades WHERE mode='demo'").rowcount
+        conn=get_conn()
+        deleted=conn.execute("DELETE FROM trades WHERE mode='demo'").rowcount
         conn.commit(); conn.close()
-        starting        = float(_gs('starting_balance') or 1000)
-        _demo['balance'] = starting
-        _demo['init']    = True
+        starting=float(_gs('starting_balance') or 1000)
+        _demo['balance']=starting; _demo['init']=True
+        alog('system',f'Demo reset: {deleted} trades deleted, balance reset to ${starting}')
         push()
         return jsonify({'ok':True,'deleted_trades':deleted,'new_balance':starting})
-    except Exception as e: return jsonify({'error':str(e)}), 500
+    except Exception as e: return jsonify({'error':str(e)}),500
+
+# ── Export (with date range) ───────────────────────────────────────────────────
+@app.route('/api/export/trades')
+@login_required
+def export_trades():
+    import csv, io
+    from db.database import get_conn
+    date_from=request.args.get('date_from','')
+    date_to  =request.args.get('date_to','')
+    conditions=[]; params=[]
+    if date_from: conditions.append("date(opened_at)>=?"); params.append(date_from)
+    if date_to:   conditions.append("date(opened_at)<=?"); params.append(date_to)
+    where=('WHERE '+' AND '.join(conditions)) if conditions else ''
+    conn=get_conn()
+    rows=conn.execute(f'SELECT * FROM trades {where} ORDER BY opened_at DESC',params).fetchall()
+    conn.close()
+    out=io.StringIO()
+    w=csv.writer(out)
+    w.writerow(['ID','Mode','Pair','Side','Entry','Exit','Qty','PnL','Status',
+                'Strategy','SL','TP','Opened','Closed'])
+    for r in rows:
+        w.writerow([r['id'],r['mode'],r['pair'],r['side'],r['entry_price'],
+                    r['exit_price'] or '',r['quantity'],round(r['pnl'] or 0,4),
+                    r['status'],r['strategy_reason'] or '',r['stop_loss'],
+                    r['take_profit'],r['opened_at'],r['closed_at'] or ''])
+    fname=f"trades_{date_from or 'all'}{'_to_'+date_to if date_to else ''}.csv"
+    return Response(out.getvalue(),mimetype='text/csv',
+                    headers={'Content-Disposition':f'attachment; filename={fname}'})
+
+@app.route('/api/export/activity')
+@login_required
+def export_activity():
+    import csv, io
+    date_from=request.args.get('date_from','')
+    date_to  =request.args.get('date_to','')
+    logs=get_logs(limit=2000,category=request.args.get('category','all'),
+                  date_from=date_from or None, date_to=date_to or None)
+    out=io.StringIO()
+    w=csv.writer(out)
+    w.writerow(['ID','Timestamp','Category','Level','Message','Detail'])
+    for entry in reversed(logs):
+        detail=''
+        try:
+            if entry.get('detail'):
+                d=json.loads(entry['detail'])
+                detail=' | '.join(f'{k}={v}' for k,v in d.items())
+        except: pass
+        w.writerow([entry.get('id',''),entry.get('ts',''),entry.get('category',''),
+                    entry.get('level',''),entry.get('message',''),detail])
+    fname=f"activity_{date_from or 'all'}.csv"
+    return Response(out.getvalue(),mimetype='text/csv',
+                    headers={'Content-Disposition':f'attachment; filename={fname}'})
+
+@app.route('/api/export/summary')
+@login_required
+def export_summary():
+    try:
+        from db.database import get_conn
+        date_from=request.args.get('date_from','')
+        date_to  =request.args.get('date_to','')
+        cond=[]; params=[]
+        if date_from: cond.append("date(opened_at)>=?"); params.append(date_from)
+        if date_to:   cond.append("date(opened_at)<=?"); params.append(date_to)
+        where=('WHERE '+' AND '.join(cond)) if cond else ''
+        conn=get_conn()
+        trades=[dict(r) for r in conn.execute(
+            f"SELECT * FROM trades WHERE status='closed' {('AND '+' AND '.join(cond)) if cond else ''} ORDER BY opened_at",
+            params).fetchall()]
+        open_trades=[dict(r) for r in conn.execute("SELECT * FROM trades WHERE status='open'").fetchall()]
+        pair_stats=[dict(r) for r in conn.execute(f'''
+            SELECT pair,COUNT(*) as total,
+            SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins,
+            SUM(CASE WHEN pnl<0 THEN 1 ELSE 0 END) as losses,
+            ROUND(AVG(pnl),4) as avg_pnl,ROUND(SUM(pnl),4) as total_pnl,
+            ROUND(MAX(pnl),4) as best_trade,ROUND(MIN(pnl),4) as worst_trade
+            FROM trades WHERE status='closed' {('AND '+' AND '.join(cond)) if cond else ''}
+            GROUP BY pair ORDER BY total_pnl DESC''',params).fetchall()]
+        strategy_stats=[dict(r) for r in conn.execute(f'''
+            SELECT CASE
+                WHEN strategy_reason LIKE '%Donchian%' THEN 'Donchian'
+                WHEN strategy_reason LIKE '%MTF%' THEN 'MTF'
+                WHEN strategy_reason LIKE '%EMA%cross%' THEN 'EMA Cross'
+                WHEN strategy_reason LIKE '%Manual%' THEN 'Manual'
+                ELSE 'RSI/MACD/BB' END as strategy,
+            COUNT(*) as total,SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins,
+            ROUND(SUM(pnl),4) as total_pnl,ROUND(AVG(pnl),4) as avg_pnl
+            FROM trades WHERE status='closed' {('AND '+' AND '.join(cond)) if cond else ''}
+            GROUP BY strategy ORDER BY total_pnl DESC''',params).fetchall()]
+        daily=[dict(r) for r in conn.execute(f'''
+            SELECT date(closed_at) as date,COUNT(*) as trades,
+            SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins,ROUND(SUM(pnl),4) as pnl
+            FROM trades WHERE status='closed' {('AND '+' AND '.join(cond)) if cond else ''}
+            GROUP BY date(closed_at) ORDER BY date''',params).fetchall()]
+        conn.close()
+        settings={k:get_setting(k) for k in
+                  ['strategy_mode','stop_loss_pct','take_profit_pct','position_size_usdt',
+                   'max_positions','trailing_stop_enabled','partial_close_enabled',
+                   'use_llm_filter','mtf_enabled','ai_brain_enabled','trading_mode']}
+        summary={
+            'exported_at':datetime.utcnow().isoformat(),
+            'period':{'from':date_from or 'all','to':date_to or 'all'},
+            'overall_stats':get_stats(),
+            'settings':settings,
+            'pair_stats':pair_stats,
+            'strategy_stats':strategy_stats,
+            'daily_pnl':daily,
+            'open_trades':open_trades,
+            'closed_trades':trades,
+            'brain_log':get_brain_log()[:10],
+        }
+        fname=f"summary_{date_from or 'all'}.json"
+        return Response(json.dumps(summary,indent=2,default=str),
+                        mimetype='application/json',
+                        headers={'Content-Disposition':f'attachment; filename={fname}'})
+    except Exception as e:
+        logger.error(f'Export summary: {e}'); return jsonify({'error':str(e)}),500
 
 # ── WebSocket ──────────────────────────────────────────────────────────────────
 @socketio.on('connect')
 def on_connect():
     logger.info('Client connected')
-    try: emit('dashboard_update', get_dashboard_data())
-    except Exception as e: logger.error(f'Connect push: {e}')
+    try: emit('dashboard_update',get_dashboard_data())
+    except Exception as e: logger.error(f'Connect: {e}')
 
-# ── Main ───────────────────────────────────────────────────────────────────────
-if __name__ == '__main__':
-    logger.info('Trading Bot starting on port 5000...')
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+if __name__=='__main__':
+    logger.info('Starting on port 5000...')
+    socketio.run(app,host='0.0.0.0',port=5000,debug=False)
