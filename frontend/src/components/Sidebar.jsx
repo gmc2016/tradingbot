@@ -78,10 +78,7 @@ function PairRow({ pair, selected, onClick }) {
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-        <SignalBadge signal={p.signal} confidence={p.confidence}/>
-        {pair.confidence > 0 && (
-          <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{pair.confidence}%</span>
-        )}
+        <SignalBadge signal={pair.signal} confidence={pair.confidence}/>
       </div>
     </div>
   )
