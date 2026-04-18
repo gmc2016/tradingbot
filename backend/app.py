@@ -218,6 +218,29 @@ def run_now():
     try: scan_and_trade(); refresh_pair_cache(); push(); return jsonify({'ok':True})
     except Exception as e: return jsonify({'error':str(e)}), 500
 
+@app.route('/api/ai/test')
+@login_required
+def test_ai():
+    from db.database import get_setting
+    import requests as req, json, re
+    key = get_setting('anthropic_api_key') or ''
+    if not key:
+        return jsonify({'ok': False, 'error': 'No Anthropic API key saved'})
+    try:
+        r = req.post('https://api.anthropic.com/v1/messages',
+            headers={'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
+            json={'model': 'claude-haiku-4-5-20251001', 'max_tokens': 50,
+                  'messages': [{'role': 'user', 'content': 'Reply with just: OK'}]},
+            timeout=10)
+        data = r.json()
+        if r.status_code == 200:
+            text = data.get('content', [{}])[0].get('text', '')
+            return jsonify({'ok': True, 'message': f'AI working — response: {text.strip()}'})
+        else:
+            return jsonify({'ok': False, 'error': data.get('error', {}).get('message', 'Unknown error')})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+
 @app.route('/api/prices')
 def get_prices(): return jsonify(_prices)
 
