@@ -242,7 +242,10 @@ Respond in JSON only:
         )
         data   = r.json()
         text   = data.get('content', [{}])[0].get('text', '')
-        text   = re.sub(r'```json|```', '', text).strip()
+        text  = re.sub(r'```json|```', '', text).strip()
+        start = text.find('{')
+        end   = text.rfind('}')
+        if start != -1 and end != -1: text = text[start:end+1]
         result = json.loads(text)
         approved  = result.get('approved', True)
         reasoning = result.get('reasoning', '')
