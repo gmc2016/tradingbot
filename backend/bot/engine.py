@@ -23,21 +23,26 @@ def get_demo_balance():
 
 def adj_demo(d): _demo['balance'] += d
 
+def _s(key, default):
+    """Safe setting getter — always returns default if None or empty."""
+    val = get_setting(key)
+    return val if (val is not None and val != '') else str(default)
+
 def get_config():
     return {
-        'max_positions':        int(get_setting('max_positions') or 5),
-        'stop_loss_pct':        float(get_setting('stop_loss_pct') or 1.5) / 100,
-        'take_profit_pct':      float(get_setting('take_profit_pct') or 3.0) / 100,
-        'position_size_usdt':   float(get_setting('position_size_usdt') or 100),
-        'mode':                 get_setting('trading_mode') or 'demo',
-        'trailing_stop':        get_setting('trailing_stop_enabled') == 'true',
-        'trailing_stop_pct':    float(get_setting('trailing_stop_pct') or 0.8) / 100,
-        'partial_close':        get_setting('partial_close_enabled') == 'true',
-        'partial_close_at_pct': float(get_setting('partial_close_at_pct') or 1.5) / 100,
-        'partial_close_size':   float(get_setting('partial_close_size_pct') or 50) / 100,
-        'strategy':             get_setting('strategy_mode') or 'combined',
-        'max_loss_streak':      int(get_setting('max_loss_streak') or 3),
-        'cooldown_minutes':     int(get_setting('cooldown_minutes') or 60),
+        'max_positions':        int(_s('max_positions', 5)),
+        'stop_loss_pct':        float(_s('stop_loss_pct', 1.5)) / 100,
+        'take_profit_pct':      float(_s('take_profit_pct', 3.0)) / 100,
+        'position_size_usdt':   float(_s('position_size_usdt', 100)),
+        'mode':                 _s('trading_mode', 'demo'),
+        'trailing_stop':        _s('trailing_stop_enabled', 'true') == 'true',
+        'trailing_stop_pct':    float(_s('trailing_stop_pct', 0.8)) / 100,
+        'partial_close':        _s('partial_close_enabled', 'true') == 'true',
+        'partial_close_at_pct': float(_s('partial_close_at_pct', 1.5)) / 100,
+        'partial_close_size':   float(_s('partial_close_size_pct', 50)) / 100,
+        'strategy':             _s('strategy_mode', 'combined'),
+        'max_loss_streak':      int(_s('max_loss_streak', 3)),
+        'cooldown_minutes':     int(_s('cooldown_minutes', 60)),
     }
 
 def get_pairs_list():
