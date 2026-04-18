@@ -1,9 +1,14 @@
 import requests, logging, re, os, json
+from db.activitylog import log as alog
 from datetime import datetime, timedelta
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 logger   = logging.getLogger(__name__)
 analyzer = SentimentIntensityAnalyzer()
+
+# Cache LLM sentiment results — only call Claude once per hour per pair
+_sentiment_cache = {}  # { pair: {'score': 50.0, 'ts': datetime} }
+SENTIMENT_CACHE_MINUTES = 60  # re-analyze max once per hour
 
 def get_newsapi_key():
     from db.database import get_setting
@@ -130,6 +135,8 @@ Rules:
         if already_priced:
             score = score * 0.3  # heavily discount priced-in news
         logger.info(f'LLM sentiment {pair}: {label} ({score:.2f}) — {reason}')
+        alog('ai', f'Sentiment {pair}: {label} ({score:+.2f}) — {reason}',
+             detail={'pair':pair,'score':round(score,3),'label':label,'already_priced_in':already_priced})
         return score, label, reason
     except Exception as e:
         logger.warning(f'LLM sentiment error: {e}')
@@ -156,31 +163,51 @@ def fetch_and_analyze():
 def get_pair_sentiment(pair):
     """
     Returns sentiment score 0-100 for a coin.
-    Uses LLM analysis if Anthropic key is configured, else VADER fallback.
+    LLM is called at most once per hour per pair — cached result used otherwise.
+    VADER (free, no API) used between LLM calls.
     """
     from db.database import get_news
+    from datetime import datetime, timedelta
+
     coin = pair.split('/')[0].upper()
     km   = {'BTC':['bitcoin','btc'],'ETH':['ethereum','eth'],
             'BNB':['binance','bnb'],'SOL':['solana','sol'],'XRP':['ripple','xrp'],
             'ADA':['cardano','ada'],'DOGE':['dogecoin','doge'],'AVAX':['avalanche','avax']}
-    kw   = km.get(coin, [coin.lower()])
-    news = get_news(100)
-    rel  = [n for n in news if any(k in (n['title'] or '').lower() for k in kw)]
+    kw    = km.get(coin, [coin.lower()])
+    news  = get_news(100)
+    rel   = [n for n in news if any(k in (n['title'] or '').lower() for k in kw)]
     items = rel or news
 
-    # Try LLM analysis if key is available
+    # Check cache — use cached LLM result if fresh enough
+    cached = _sentiment_cache.get(pair)
+    cache_valid = (
+        cached and
+        (datetime.utcnow() - cached['ts']) < timedelta(minutes=SENTIMENT_CACHE_MINUTES)
+    )
+
     anthropic_key = get_anthropic_key()
-    if anthropic_key and rel:
+    if anthropic_key and rel and not cache_valid:
+        # Only call LLM if cache is stale
         headlines = [n['title'] for n in rel[:10] if n['title']]
+        try:
+            from bot.engine import increment_llm_counter
+            increment_llm_counter()
+        except: pass
         llm_score, llm_label, llm_reason = llm_analyze_news(headlines, pair)
         if llm_score is not None:
-            # Blend LLM score (70%) with VADER average (30%)
             vader_scores = [n['sentiment_score'] for n in items if n['sentiment_score'] is not None]
             vader_avg    = sum(vader_scores)/len(vader_scores) if vader_scores else 0
             blended      = (llm_score * 0.7) + (vader_avg * 0.3)
-            return round((blended + 1) / 2 * 100, 1)
+            score        = round((blended + 1) / 2 * 100, 1)
+            # Store in cache
+            _sentiment_cache[pair] = {'score': score, 'ts': datetime.utcnow(), 'label': llm_label}
+            return score
 
-    # VADER fallback
+    # Use cached LLM score if available (even if stale — better than calling again)
+    if cached:
+        return cached['score']
+
+    # VADER fallback (free, always available)
     scores = [n['sentiment_score'] for n in items if n['sentiment_score'] is not None]
     if not scores: return 50.0
     return round((sum(scores)/len(scores) + 1) / 2 * 100, 1)
@@ -194,6 +221,10 @@ def llm_trade_decision(pair, signal, confidence, indicators, sentiment_score, re
     key = get_anthropic_key()
     if not key:
         return True, 'No LLM key — proceeding with technical signal', confidence
+    try:
+        from bot.engine import increment_llm_counter
+        increment_llm_counter()
+    except: pass
 
     headlines = [n['title'] for n in (recent_news or [])[:8] if n.get('title')]
     headlines_text = '\n'.join(f'- {h}' for h in headlines) if headlines else 'No recent news available'
@@ -252,6 +283,9 @@ Respond in JSON only:
         adj_conf  = int(result.get('adjusted_confidence', confidence))
         risk      = result.get('risk_level', 'medium')
         logger.info(f'LLM trade decision {pair} {signal}: {"APPROVED" if approved else "REJECTED"} — {reasoning}')
+        level = 'success' if approved else 'warning'
+        alog('ai', f'Trade filter {pair} {signal}: {"✓ APPROVED" if approved else "✗ REJECTED"} (conf:{adj_conf}%) — {reasoning}',
+             level=level, detail={'pair':pair,'signal':signal,'approved':approved,'confidence':adj_conf,'risk':risk})
         return approved, reasoning, adj_conf
     except Exception as e:
         logger.warning(f'LLM trade decision error: {e}')
