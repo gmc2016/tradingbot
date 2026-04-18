@@ -112,11 +112,12 @@ def get_recent_trades(limit=50):
     rows = conn.execute('SELECT * FROM trades ORDER BY opened_at DESC LIMIT ?', (limit,)).fetchall()
     conn.close(); return [dict(r) for r in rows]
 
-def get_all_trades(page=1, per_page=50, pair=None, status=None):
+def get_all_trades(page=1, per_page=50, pair=None, status=None, strategy=None):
     conn = get_conn()
     conditions = []; params = []
-    if pair:   conditions.append('pair=?');   params.append(pair)
-    if status: conditions.append('status=?'); params.append(status)
+    if pair:     conditions.append('pair=?');   params.append(pair)
+    if status:   conditions.append('status=?'); params.append(status)
+    if strategy: conditions.append('LOWER(strategy_reason) LIKE ?'); params.append(f'%{strategy}%')
     where = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
     total = conn.execute(f'SELECT COUNT(*) as c FROM trades {where}', params).fetchone()['c']
     offset = (page-1)*per_page
