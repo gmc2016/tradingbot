@@ -67,12 +67,15 @@ function Dashboard({ auth, logout }) {
             onMouseLeave={e=>{e.currentTarget.style.background='transparent';e.currentTarget.style.color='var(--text-2)'}}
           >{label}</button>
         ))}
-        <span style={{marginLeft:'auto',fontSize:11,color:'var(--text-3)'}}>
-          {config.strategy_mode&&<span style={{marginRight:8,color:'var(--teal)'}}>
+        <span style={{marginLeft:'auto',fontSize:11,color:'var(--text-3)',display:'flex',alignItems:'center',gap:8}}>
+          {config.strategy_mode&&<span style={{color:'var(--teal)'}}>
             {config.strategy_mode==='combined'?'🔀':config.strategy_mode==='donchian'?'📊':config.strategy_mode==='mtf'?'🕐':'📈'} {config.strategy_mode}
-            {config.use_llm_filter==='true'&&config.anthropic_key_set&&<span style={{color:'#a855f7',marginLeft:4}}>+ AI</span>}
           </span>}
-          Prices: real-time · Signals: 5 min
+          {config.use_llm_filter==='true'&&config.anthropic_key_set
+            ?<span style={{background:'rgba(168,85,247,.15)',border:'1px solid rgba(168,85,247,.3)',borderRadius:10,padding:'1px 7px',color:'#a855f7',fontWeight:600}}>🤖 AI active</span>
+            :<span style={{background:'var(--bg-hover)',borderRadius:10,padding:'1px 7px',color:'var(--text-3)'}}>AI off</span>
+          }
+          <span>Prices: real-time · Signals: 5 min</span>
         </span>
         {data.last_update&&<span style={{fontSize:11,color:'var(--text-3)'}}>Updated {new Date(data.last_update).toLocaleTimeString()}</span>}
       </div>
