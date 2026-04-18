@@ -13,6 +13,7 @@ import ManualTrade    from './components/ManualTrade'
 import HelpPage       from './components/HelpPage'
 import ScannerPanel  from './components/ScannerPanel'
 import AccountPage   from './components/AccountPage'
+import BrainPanel    from './components/BrainPanel'
 
 function Dashboard({ auth, logout }) {
   const { data, connected, prices, startBot, stopBot, setMode, runNow, refreshNews, updateSettings } = useDashboard()
@@ -23,6 +24,7 @@ function Dashboard({ auth, logout }) {
   const [showHelp,      setShowHelp]      = useState(false)
   const [showScanner,   setShowScanner]   = useState(false)
   const [showAccount,   setShowAccount]   = useState(false)
+  const [showBrain,     setShowBrain]     = useState(false)
 
   const handleModeChange = (mode) => {
     if (mode === 'live') {
@@ -59,6 +61,7 @@ function Dashboard({ auth, logout }) {
     ['❓ Help',          () => setShowHelp(true)],
     ['🔍 Scan pairs',    () => setShowScanner(true)],
     ['💰 Account',       () => setShowAccount(true)],
+    ['🧠 AI Brain',      () => setShowBrain(true)],
   ]
 
   return (
@@ -101,6 +104,7 @@ function Dashboard({ auth, logout }) {
       {showHelp&&<HelpPage onClose={()=>setShowHelp(false)}/>}
       {showScanner&&<ScannerPanel config={config} onClose={()=>setShowScanner(false)} onPairsUpdated={()=>runNow()}/>}
       {showAccount&&<AccountPage onClose={()=>setShowAccount(false)}/>}
+      {showBrain&&<BrainPanel config={config} onClose={()=>setShowBrain(false)}/>}
       {showTrade&&(
         <ManualTrade
           pairs={pairs}
