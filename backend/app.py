@@ -11,7 +11,7 @@ from functools import wraps
 from db.database import (init_db, init_auth, get_setting, set_setting,
                           get_recent_trades, get_news, get_all_trades,
                           check_login, change_password)
-from bot.engine import scan_and_trade, get_dashboard_data, start_cache_refresh, refresh_pair_cache
+from bot.engine import scan_and_trade, get_dashboard_data, start_cache_refresh, refresh_pair_cache, open_manual_trade, close_manual_trade
 from ai.sentiment import fetch_and_analyze
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
@@ -161,6 +161,7 @@ def get_settings():
     data['binance_api_key']    = '***' if get_setting('binance_api_key')    else ''
     data['binance_api_secret'] = '***' if get_setting('binance_api_secret') else ''
     data['newsapi_key']        = '***' if get_setting('newsapi_key')        else ''
+    data['anthropic_api_key']  = '***' if get_setting('anthropic_api_key')  else ''
     return jsonify(data)
 
 @app.route('/api/settings', methods=['POST'])
@@ -170,9 +171,9 @@ def upd_settings():
     for k in ['max_positions','stop_loss_pct','take_profit_pct','position_size_usdt',
               'active_pairs','starting_balance','trailing_stop_enabled','trailing_stop_pct',
               'partial_close_enabled','partial_close_at_pct','partial_close_size_pct',
-              'strategy_mode','max_loss_streak','cooldown_minutes']:
+              'strategy_mode','max_loss_streak','cooldown_minutes','use_llm_filter','mtf_enabled']:
         if k in data: set_setting(k, str(data[k]))
-    for k in ['binance_api_key','binance_api_secret','newsapi_key']:
+    for k in ['binance_api_key','binance_api_secret','newsapi_key','anthropic_api_key']:
         if k in data and data[k] and data[k] != '***':
             set_setting(k, str(data[k]))
             logger.info(f'Saved {k}')
@@ -219,6 +220,35 @@ def run_now():
 
 @app.route('/api/prices')
 def get_prices(): return jsonify(_prices)
+
+@app.route('/api/trade/manual', methods=['POST'])
+@login_required
+def manual_trade():
+    data = request.json or {}
+    try:
+        mode = get_setting('trading_mode') or 'demo'
+        result = open_manual_trade(
+            pair       = data['pair'],
+            side       = data['side'],
+            usdt_amount= float(data.get('usdt_amount', 100)),
+            sl_pct     = float(data.get('sl_pct', 1.5)),
+            tp_pct     = float(data.get('tp_pct', 3.0)),
+            mode       = mode,
+        )
+        refresh_pair_cache(); push()
+        return jsonify({'ok': True, 'trade': result})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/trade/close/<int:trade_id>', methods=['POST'])
+@login_required
+def force_close_trade(trade_id):
+    try:
+        result = close_manual_trade(trade_id)
+        refresh_pair_cache(); push()
+        return jsonify({'ok': True, 'result': result})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 @socketio.on('connect')
 def on_connect():
