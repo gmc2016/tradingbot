@@ -89,6 +89,9 @@ export default function ActivityLog({ onClose }) {
       <div style={{height:48,background:'var(--bg-surface)',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:12,padding:'0 16px',flexShrink:0}}>
         <button onClick={onClose} style={{color:'var(--text-2)',fontSize:18}}>←</button>
         <span style={{fontWeight:600,fontSize:15}}>Live Activity Log</span>
+          <button onClick={()=>window.open('/api/export/activity','_blank')} style={{padding:'3px 10px',border:'1px solid var(--teal)',borderRadius:5,fontSize:11,color:'var(--teal)',background:'rgba(20,184,166,.1)'}}>
+            ↓ Export CSV
+          </button>
         <div style={{width:8,height:8,borderRadius:'50%',background:paused?'var(--amber)':'var(--green)',
           boxShadow:paused?'none':'0 0 6px var(--green)'}}/>
         <span style={{fontSize:11,color:'var(--text-3)'}}>{paused?'Paused':'Live'}</span>
