@@ -486,7 +486,8 @@ def export_activity():
 @login_required
 def export_summary():
     """Export a full JSON summary — trades + stats + settings + activity.
-    Paste this into Claude for analysis."""    import json
+    Paste this into Claude for analysis."""
+    import json
     from db.database import get_conn, get_stats, get_setting
     from db.activitylog import get_logs
 
