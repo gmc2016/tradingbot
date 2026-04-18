@@ -61,7 +61,25 @@ def init_db():
         if row and not row['value'] and env_val:
             c.execute('UPDATE settings SET value=? WHERE key=?', (env_val, db_key))
 
-    conn.commit(); conn.close()
+    conn.commit()
+
+    # Migration: ensure any newly added settings exist in old databases
+    migration_defaults = [
+        ('use_llm_filter', 'false'), ('mtf_enabled', 'false'),
+        ('scanner_enabled', 'true'), ('scanner_auto_update', 'true'),
+        ('scanner_top_n', '8'), ('scanner_interval_hours', '6'),
+        ('pinned_pairs', 'BTC/USDT,ETH/USDT'),
+        ('last_scan_at', ''), ('last_scan_result', ''),
+        ('strategy_mode', 'combined'), ('max_loss_streak', '3'),
+        ('cooldown_minutes', '60'), ('trailing_stop_enabled', 'true'),
+        ('partial_close_enabled', 'true'), ('max_positions', '5'),
+        ('anthropic_api_key', os.environ.get('ANTHROPIC_API_KEY', '')),
+    ]
+    for k, v in migration_defaults:
+        c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (k, v))
+
+    conn.commit()
+    conn.close()
 
 def get_setting(k):
     conn = get_conn()
