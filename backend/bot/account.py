@@ -40,19 +40,35 @@ def get_anthropic_usage():
         return {'error': str(e)}
 
 def get_anthropic_balance():
-    """Check Anthropic credit balance."""
-    key = get_anthropic_key()
+    """Check Anthropic credit balance via usage API."""    key = get_anthropic_key()
     if not key: return None
     try:
+        # Try the billing/credits endpoint
         r = requests.get(
-            'https://api.anthropic.com/v1/organizations/billing',
+            'https://api.anthropic.com/v1/organizations/billing/credit_grants',
             headers={'x-api-key': key, 'anthropic-version': '2023-06-01'},
             timeout=10
         )
         if r.status_code == 200:
-            return r.json()
-        return None
-    except: return None
+            data = r.json()
+            grants = data.get('data', [])
+            total  = sum(g.get('amount', 0) for g in grants)
+            used   = sum(g.get('used_amount', 0) for g in grants)
+            return {'total': total/100, 'used': used/100, 'remaining': (total-used)/100}
+        # Fallback: just verify the key works
+        r2 = requests.post(
+            'https://api.anthropic.com/v1/messages',
+            headers={'x-api-key': key, 'anthropic-version': '2023-06-01',
+                     'content-type': 'application/json'},
+            json={'model': 'claude-haiku-4-5-20251001', 'max_tokens': 1,
+                  'messages': [{'role': 'user', 'content': 'hi'}]},
+            timeout=10
+        )
+        if r2.status_code == 200:
+            return {'status': 'active', 'note': 'Balance endpoint not available — key is working'}
+        return {'error': f'HTTP {r2.status_code}'}
+    except Exception as e:
+        return {'error': str(e)}
 
 def get_binance_balance():
     """Get full Binance account balance breakdown."""
