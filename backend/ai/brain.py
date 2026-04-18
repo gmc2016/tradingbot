@@ -9,8 +9,16 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 def get_anthropic_key():
-    from db.database import get_setting
-    return get_setting('anthropic_api_key') or ''
+    try:
+        from db.database import get_setting
+        val = get_setting('anthropic_api_key')
+        if val and val not in ('None', '', 'none'):
+            return val
+        import os
+        return os.environ.get('ANTHROPIC_API_KEY', '')
+    except Exception:
+        import os
+        return os.environ.get('ANTHROPIC_API_KEY', '')
 
 def get_market_summary():
     """
@@ -188,7 +196,8 @@ Respond in JSON only:
         logger.info(f'AI Brain: {result.get("action")} — {result.get("reasoning","")}')
         return result
     except Exception as e:
-        logger.warning(f'AI Brain error: {e}')
+        import traceback
+        logger.warning(f'AI Brain error: {e}\n{traceback.format_exc()}')
         return None
 
 def apply_brain_recommendations(result):
