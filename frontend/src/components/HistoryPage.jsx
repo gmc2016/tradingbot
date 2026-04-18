@@ -52,6 +52,12 @@ export default function HistoryPage({ onClose }) {
           <button onClick={onClose} style={{color:'var(--text-2)',fontSize:18,padding:'0 4px'}}>←</button>
           <span style={{fontWeight:600,fontSize:15}}>Trade History</span>
           <span style={{fontSize:12,color:'var(--text-3)'}}>{total} total trades</span>
+          <button onClick={()=>window.open('/api/export/trades','_blank')} style={{padding:'4px 12px',border:'1px solid var(--teal)',borderRadius:6,fontSize:11,color:'var(--teal)',background:'rgba(20,184,166,.1)'}}>
+            ↓ Export CSV
+          </button>
+          <button onClick={()=>window.open('/api/export/summary','_blank')} style={{padding:'4px 12px',border:'1px solid rgba(168,85,247,.4)',borderRadius:6,fontSize:11,color:'#a855f7',background:'rgba(168,85,247,.1)'}}>
+            🤖 Export for AI review
+          </button>
         </div>
         {/* Summary stats */}
         <div style={{display:'flex',gap:20}}>
