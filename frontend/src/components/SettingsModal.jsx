@@ -11,6 +11,7 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
     partial_close_enabled:'true', partial_close_at_pct:'1.5', partial_close_size_pct:'50',
     max_loss_streak:'3', cooldown_minutes:'60',
     binance_api_key:'', binance_api_secret:'', newsapi_key:'', anthropic_api_key:'',
+    scanner_enabled:'true', scanner_auto_update:'true', scanner_top_n:'8', pinned_pairs:'BTC/USDT,ETH/USDT',
   })
   const [showSecrets,  setShowSecrets]  = useState(false)
   const [saved,        setSaved]        = useState(false)
@@ -221,7 +222,24 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
             <InfoBox>
               Which trading pairs the bot monitors and trades. Add any Binance spot pair ending in USDT. More pairs = more opportunities but also more concurrent positions possible.
             </InfoBox>
-            <Field label="Active trading pairs">
+            <SectionHead label="Smart scanner"/>
+            <Toggle label="Enable automatic pair scanning (runs every 6 hours)" value={f.scanner_enabled==='true'} onClick={()=>toggle('scanner_enabled')}/>
+            {f.scanner_enabled==='true'&&<>
+              <Toggle label="Auto-update active pairs after each scan" value={f.scanner_auto_update==='true'} onClick={()=>toggle('scanner_auto_update')}/>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginTop:10}}>
+                <Field label="Top N pairs to select" hint="from scan results">
+                  <input type="number" step="1" min="3" max="15" value={f.scanner_top_n} onChange={e=>set('scanner_top_n',e.target.value)}/>
+                </Field>
+                <Field label="Pinned pairs (always included)" hint="Never removed by scanner">
+                  <input type="text" placeholder="BTC/USDT,ETH/USDT" value={f.pinned_pairs} onChange={e=>set('pinned_pairs',e.target.value)}/>
+                </Field>
+              </div>
+              <div style={{fontSize:11,color:'var(--text-3)',marginTop:4,lineHeight:1.5,marginBottom:12}}>
+                Scanner scans all Binance USDT pairs and picks the best ones based on volume, volatility, and ADX trend strength. With Anthropic key, Claude AI ranks and explains the selection.
+              </div>
+            </>}
+            <Divider/>
+            <Field label="Active trading pairs" hint="Current list — updated by scanner or manually">
               <textarea rows={6} value={f.active_pairs} onChange={e=>set('active_pairs',e.target.value)}
                 style={{resize:'vertical',fontFamily:'monospace',fontSize:12}}/>
               <Hint>Comma-separated. Examples: BTC/USDT, ETH/USDT, SOL/USDT, ADA/USDT, MATIC/USDT, LINK/USDT</Hint>
