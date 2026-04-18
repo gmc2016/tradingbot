@@ -10,7 +10,7 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
     trailing_stop_enabled:'true', trailing_stop_pct:'0.8',
     partial_close_enabled:'true', partial_close_at_pct:'1.5', partial_close_size_pct:'50',
     max_loss_streak:'3', cooldown_minutes:'60',
-    binance_api_key:'', binance_api_secret:'', newsapi_key:'',
+    binance_api_key:'', binance_api_secret:'', newsapi_key:'', anthropic_api_key:'',
   })
   const [showSecrets,  setShowSecrets]  = useState(false)
   const [saved,        setSaved]        = useState(false)
@@ -27,6 +27,7 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
         binance_api_key:    s.binance_api_key    ==='***'?'':(s.binance_api_key||''),
         binance_api_secret: s.binance_api_secret ==='***'?'':(s.binance_api_secret||''),
         newsapi_key:        s.newsapi_key        ==='***'?'':(s.newsapi_key||''),
+        anthropic_api_key:  s.anthropic_api_key  ==='***'?'':(s.anthropic_api_key||''),
       }))
     })
   }, [])
@@ -109,6 +110,16 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
               </div>
             </Field>
 
+            <Divider/>
+            <SectionHead label="AI / LLM settings"/>
+            <Toggle label="Use Claude AI to filter trades (requires Anthropic key)" value={f.use_llm_filter==='true'} onClick={()=>toggle('use_llm_filter')}/>
+            {f.use_llm_filter==='true'&&<div style={{fontSize:11,color:'var(--text-3)',marginTop:4,marginBottom:8,lineHeight:1.5}}>
+              Before each trade, Claude AI evaluates the signal against recent news and market context. Requires Anthropic API key in API Keys tab. Without the key this setting is ignored.
+            </div>}
+            <Toggle label="Multi-timeframe confirmation (4h confirms 1h signal)" value={f.mtf_enabled==='true'} onClick={()=>toggle('mtf_enabled')}/>
+            {f.mtf_enabled==='true'&&<div style={{fontSize:11,color:'var(--text-3)',marginTop:4,marginBottom:8,lineHeight:1.5}}>
+              In Combined/MTF mode, 4h candles are fetched alongside 1h. Improves signal quality but uses more API calls.
+            </div>}
             <Divider/>
             <SectionHead label="Agno-style loss protection"/>
             <InfoBox>
@@ -233,6 +244,7 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
               ['Binance API Key',    'binance_api_key',    'Enable in Binance → API Management → Spot Trading only'],
               ['Binance API Secret', 'binance_api_secret', 'Never share this with anyone'],
               ['NewsAPI Key',        'newsapi_key',        'Free tier: 100 requests/day at newsapi.org'],
+              ['Anthropic API Key',  'anthropic_api_key',  'Enables Claude AI trade filtering — get key at console.anthropic.com'],
             ].map(([label,key,hint])=>(
               <Field key={key} label={label}
                 hint={config[key]==='***'?'✓ Currently saved':'⚠ Not yet saved'}
