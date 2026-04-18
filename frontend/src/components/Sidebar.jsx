@@ -1,4 +1,5 @@
 import React from 'react'
+import { SignalBadge } from './Tooltip'
 
 export default function Sidebar({ pairs = [], selectedPair, onSelectPair, balance, config, mode }) {
   return (
@@ -77,9 +78,7 @@ function PairRow({ pair, selected, onClick }) {
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-        <span className={`badge badge-${(pair.signal || 'hold').toLowerCase()}`}>
-          {pair.signal || '—'}
-        </span>
+        <SignalBadge signal={p.signal} confidence={p.confidence}/>
         {pair.confidence > 0 && (
           <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{pair.confidence}%</span>
         )}
