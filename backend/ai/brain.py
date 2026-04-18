@@ -190,8 +190,15 @@ Respond in JSON only:
                   'messages': [{'role': 'user', 'content': prompt}]},
             timeout=20
         )
-        text   = r.json().get('content', [{}])[0].get('text', '')
-        text   = re.sub(r'```json|```', '', text).strip()
+        text = r.json().get('content', [{}])[0].get('text', '')
+        # Extract JSON block robustly — handle extra text before/after
+        text = re.sub(r'```json|```', '', text).strip()
+        # Find the outermost JSON object
+        start = text.find('{')
+        end   = text.rfind('}')
+        if start == -1 or end == -1:
+            raise ValueError(f'No JSON found in response: {text[:100]}')
+        text   = text[start:end+1]
         result = json.loads(text)
         logger.info(f'AI Brain: {result.get("action")} — {result.get("reasoning","")}')
         return result
