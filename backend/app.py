@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 # ── Init DB first — before anything else ──────────────────────────────────────
 init_db()
 init_auth()
+from db.activitylog import init_activity_log, log as alog
+init_activity_log()
+alog('system', 'Trading Bot started', level='info')
 
 app = Flask(__name__, static_folder='/app/static', static_url_path='')
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET', secrets.token_hex(16))
@@ -30,6 +33,10 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE']   = False
 CORS(app, origins='*', supports_credentials=True)
 socketio = SocketIO(app, cors_allowed_origins='*', async_mode='eventlet')
+
+# Wire live activity push to frontend
+from db.activitylog import set_push as _set_alog_push
+_set_alog_push(socketio.emit)
 
 # ── Defaults map (never return None to frontend) ───────────────────────────────
 _SETTING_DEFAULTS = {
@@ -247,12 +254,23 @@ def upd_settings():
                  'strategy_mode','max_loss_streak','cooldown_minutes','use_llm_filter',
                  'mtf_enabled','scanner_enabled','scanner_interval_hours',
                  'scanner_auto_update','scanner_top_n','pinned_pairs','ai_brain_enabled']
+    from db.activitylog import log as alog
+    changed = []
     for k in safe_keys:
-        if k in data: set_setting(k, str(data[k]))
+        if k in data:
+            old_val = get_setting(k)
+            new_val = str(data[k])
+            if old_val != new_val:
+                set_setting(k, new_val)
+                changed.append(f'{k}: {old_val}→{new_val}')
     for k in ['binance_api_key','binance_api_secret','newsapi_key','anthropic_api_key']:
         if k in data and data[k] and data[k] != '***':
             set_setting(k, str(data[k]))
+            changed.append(f'{k}: updated')
             logger.info(f'Saved {k}')
+    if changed:
+        alog('settings', f'Settings changed by user: {", ".join(changed[:5])}{"..." if len(changed)>5 else ""}',
+             level='info', detail={'changes': changed})
     return jsonify({'ok': True})
 
 # ── Trades ─────────────────────────────────────────────────────────────────────
@@ -394,6 +412,14 @@ def test_ai():
     except Exception as e: return jsonify({'ok':False,'error':str(e)})
 
 # ── Demo reset ─────────────────────────────────────────────────────────────────
+@app.route('/api/activity')
+@login_required
+def activity_log():
+    from db.activitylog import get_logs
+    category = request.args.get('category', 'all')
+    limit    = int(request.args.get('limit', 100))
+    return jsonify(get_logs(limit=limit, category=category))
+
 @app.route('/api/demo/reset', methods=['POST'])
 @login_required
 def reset_demo():
