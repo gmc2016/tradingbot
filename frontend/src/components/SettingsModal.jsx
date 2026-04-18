@@ -277,7 +277,11 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
             <Field label="Active trading pairs" hint="Current list — updated by scanner or manually">
               <textarea rows={6} value={f.active_pairs} onChange={e=>set('active_pairs',e.target.value)}
                 style={{resize:'vertical',fontFamily:'monospace',fontSize:12}}/>
-              <Hint>Comma-separated. Examples: BTC/USDT, ETH/USDT, SOL/USDT, ADA/USDT, MATIC/USDT, LINK/USDT</Hint>
+              <Hint>
+                Comma-separated USDT pairs. Recommended quality pairs: BTC/USDT, ETH/USDT, SOL/USDT, BNB/USDT, LINK/USDT, AVAX/USDT, DOT/USDT, MATIC/USDT<br/>
+                Crypto/BTC pairs also work (e.g. ETH/BTC). Commodities on Binance: XAUUSDT (Gold), XAGUSDT (Silver) — add without slash as XAU/USDT.<br/>
+                Avoid micro-cap alts like HIGH, SAPIEN, AUDIO — low liquidity causes wide spreads.
+              </Hint>
             </Field>
           </>}
 
