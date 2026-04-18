@@ -52,6 +52,7 @@ def init_db():
         ('BINANCE_API_KEY',    'binance_api_key'),
         ('BINANCE_API_SECRET', 'binance_api_secret'),
         ('NEWSAPI_KEY',        'newsapi_key'),
+        ('ANTHROPIC_API_KEY',  'anthropic_api_key'),
     ]:
         env_val = os.environ.get(env_var, '')
         c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (db_key, env_val))
