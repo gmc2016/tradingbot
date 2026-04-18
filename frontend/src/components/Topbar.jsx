@@ -51,6 +51,16 @@ export default function Topbar({ data, connected, onStart, onStop, onModeChange 
 
       {/* Right */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* LLM usage today */}
+        {data?.llm_today > 0 && (
+          <div style={{display:'flex',alignItems:'center',gap:5,padding:'3px 10px',
+            background:'rgba(168,85,247,.1)',border:'1px solid rgba(168,85,247,.25)',borderRadius:6}}>
+            <span style={{fontSize:10,color:'#a855f7'}}>🤖</span>
+            <span style={{fontSize:11,color:'#a855f7'}}>{data.llm_today} calls today</span>
+            <span style={{fontSize:11,color:'rgba(168,85,247,.6)'}}>≈${data.llm_cost_today}</span>
+          </div>
+        )}
+
         {/* WS dot */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <div style={{
