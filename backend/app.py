@@ -420,6 +420,160 @@ def activity_log():
     limit    = int(request.args.get('limit', 100))
     return jsonify(get_logs(limit=limit, category=category))
 
+@app.route('/api/export/trades')
+@login_required
+def export_trades():
+    """Export all trades as CSV."""
+    import csv, io
+    from db.database import get_conn
+    conn = get_conn()
+    rows = conn.execute('''
+        SELECT id, mode, pair, side, entry_price, exit_price, quantity,
+               pnl, status, strategy_reason, stop_loss, take_profit,
+               opened_at, closed_at, order_id
+        FROM trades ORDER BY opened_at DESC
+    ''').fetchall()
+    conn.close()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['ID','Mode','Pair','Side','Entry','Exit','Qty','PnL',
+                     'Status','Strategy','SL','TP','Opened','Closed','OrderID'])
+    for r in rows:
+        writer.writerow([
+            r['id'], r['mode'], r['pair'], r['side'],
+            r['entry_price'], r['exit_price'] or '', r['quantity'],
+            round(r['pnl'] or 0, 4), r['status'], r['strategy_reason'] or '',
+            r['stop_loss'], r['take_profit'],
+            r['opened_at'], r['closed_at'] or '', r['order_id'] or ''
+        ])
+    from flask import Response
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=tradingbot_trades.csv'}
+    )
+
+@app.route('/api/export/activity')
+@login_required
+def export_activity():
+    """Export activity log as CSV."""
+    import csv, io, json
+    from db.activitylog import get_logs
+    logs = get_logs(limit=1000, category='all')
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['ID','Timestamp','Category','Level','Message','Detail'])
+    for entry in reversed(logs):
+        detail = ''
+        try:
+            if entry.get('detail'):
+                d = json.loads(entry['detail'])
+                detail = ' | '.join(f'{k}={v}' for k,v in d.items())
+        except: pass
+        writer.writerow([
+            entry.get('id',''), entry.get('ts',''),
+            entry.get('category',''), entry.get('level',''),
+            entry.get('message',''), detail
+        ])
+    from flask import Response
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=tradingbot_activity.csv'}
+    )
+
+@app.route('/api/export/summary')
+@login_required
+def export_summary():
+    """Export a full JSON summary — trades + stats + settings + activity.
+    Paste this into Claude for analysis."""    import json
+    from db.database import get_conn, get_stats, get_setting
+    from db.activitylog import get_logs
+
+    conn = get_conn()
+
+    # All closed trades
+    trades = [dict(r) for r in conn.execute(
+        "SELECT * FROM trades WHERE status='closed' ORDER BY opened_at"
+    ).fetchall()]
+
+    # Open trades
+    open_trades = [dict(r) for r in conn.execute(
+        "SELECT * FROM trades WHERE status='open'"
+    ).fetchall()]
+
+    # Per-pair stats
+    pair_stats = [dict(r) for r in conn.execute('''
+        SELECT pair,
+               COUNT(*) as total,
+               SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins,
+               SUM(CASE WHEN pnl<0 THEN 1 ELSE 0 END) as losses,
+               ROUND(AVG(pnl),4) as avg_pnl,
+               ROUND(SUM(pnl),4) as total_pnl,
+               ROUND(MAX(pnl),4) as best_trade,
+               ROUND(MIN(pnl),4) as worst_trade
+        FROM trades WHERE status='closed'
+        GROUP BY pair ORDER BY total_pnl DESC
+    ''').fetchall()]
+
+    # Per-strategy stats
+    strategy_stats = [dict(r) for r in conn.execute('''
+        SELECT
+            CASE
+                WHEN strategy_reason LIKE '%Donchian%' THEN 'Donchian'
+                WHEN strategy_reason LIKE '%MTF%' THEN 'MTF'
+                WHEN strategy_reason LIKE '%EMA%cross%' THEN 'EMA Cross'
+                WHEN strategy_reason LIKE '%Manual%' THEN 'Manual'
+                ELSE 'RSI/MACD/BB'
+            END as strategy,
+            COUNT(*) as total,
+            SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins,
+            ROUND(SUM(pnl),4) as total_pnl,
+            ROUND(AVG(pnl),4) as avg_pnl
+        FROM trades WHERE status='closed'
+        GROUP BY strategy ORDER BY total_pnl DESC
+    ''').fetchall()]
+
+    # Daily P&L
+    daily = [dict(r) for r in conn.execute('''
+        SELECT date(closed_at) as date,
+               COUNT(*) as trades,
+               SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins,
+               ROUND(SUM(pnl),4) as pnl
+        FROM trades WHERE status='closed'
+        GROUP BY date(closed_at) ORDER BY date
+    ''').fetchall()]
+
+    conn.close()
+
+    # Current settings
+    setting_keys = ['strategy_mode','stop_loss_pct','take_profit_pct','position_size_usdt',
+                    'max_positions','trailing_stop_enabled','trailing_stop_pct',
+                    'partial_close_enabled','partial_close_at_pct','partial_close_size_pct',
+                    'use_llm_filter','mtf_enabled','ai_brain_enabled','trading_mode']
+    settings = {k: get_setting(k) for k in setting_keys}
+
+    # Recent brain decisions
+    brain_log = get_logs(limit=20, category='brain')
+
+    summary = {
+        'exported_at':    datetime.utcnow().isoformat(),
+        'overall_stats':  get_stats(),
+        'settings':       settings,
+        'pair_stats':     pair_stats,
+        'strategy_stats': strategy_stats,
+        'daily_pnl':      daily,
+        'open_trades':    open_trades,
+        'closed_trades':  trades,
+        'brain_log':      brain_log,
+    }
+
+    return Response(
+        json.dumps(summary, indent=2, default=str),
+        mimetype='application/json',
+        headers={'Content-Disposition': 'attachment; filename=tradingbot_summary.json'}
+    )
+
 @app.route('/api/demo/reset', methods=['POST'])
 @login_required
 def reset_demo():
