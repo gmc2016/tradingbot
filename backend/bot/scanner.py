@@ -19,10 +19,13 @@ def get_anthropic_key():
     return get_setting('anthropic_api_key') or ''
 
 def fetch_all_usdt_tickers():
-    """Get all USDT spot pairs from Binance public API."""
+    """Get all USDT spot pairs from Binance public API (no auth needed)."""
     try:
-        from bot.exchange import get_exchange
-        ex      = get_exchange()
+        import ccxt
+        ex = ccxt.binance({
+            'enableRateLimit': True,
+            'options': {'defaultType': 'spot'},
+        })
         tickers = ex.fetch_tickers()
         pairs   = []
         for symbol, t in tickers.items():
