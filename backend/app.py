@@ -189,7 +189,8 @@ def trade_history():
         page=int(request.args.get('page',1)),
         per_page=int(request.args.get('per_page',50)),
         pair=request.args.get('pair'),
-        status=request.args.get('status')))
+        status=request.args.get('status'),
+        strategy=request.args.get('strategy')))
 
 @app.route('/api/news')
 @login_required
