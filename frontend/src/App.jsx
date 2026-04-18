@@ -11,6 +11,8 @@ import SettingsModal  from './components/SettingsModal'
 import HistoryPage    from './components/HistoryPage'
 import ManualTrade    from './components/ManualTrade'
 import HelpPage       from './components/HelpPage'
+import ScannerPanel  from './components/ScannerPanel'
+import AccountPage   from './components/AccountPage'
 
 function Dashboard({ auth, logout }) {
   const { data, connected, prices, startBot, stopBot, setMode, runNow, refreshNews, updateSettings } = useDashboard()
@@ -19,6 +21,8 @@ function Dashboard({ auth, logout }) {
   const [showHistory,   setShowHistory]   = useState(false)
   const [showTrade,     setShowTrade]     = useState(false)
   const [showHelp,      setShowHelp]      = useState(false)
+  const [showScanner,   setShowScanner]   = useState(false)
+  const [showAccount,   setShowAccount]   = useState(false)
 
   const handleModeChange = (mode) => {
     if (mode === 'live') {
@@ -53,6 +57,8 @@ function Dashboard({ auth, logout }) {
     ['📋 History',       () => setShowHistory(true)],
     ['⚙ Settings',      () => setShowSettings(true)],
     ['❓ Help',          () => setShowHelp(true)],
+    ['🔍 Scan pairs',    () => setShowScanner(true)],
+    ['💰 Account',       () => setShowAccount(true)],
   ]
 
   return (
@@ -93,6 +99,8 @@ function Dashboard({ auth, logout }) {
       {showSettings&&<SettingsModal config={config} onSave={updateSettings} onClose={()=>setShowSettings(false)} onLogout={logout} username={auth?.username||'admin'}/>}
       {showHistory&&<HistoryPage onClose={()=>setShowHistory(false)}/>}
       {showHelp&&<HelpPage onClose={()=>setShowHelp(false)}/>}
+      {showScanner&&<ScannerPanel config={config} onClose={()=>setShowScanner(false)} onPairsUpdated={()=>runNow()}/>}
+      {showAccount&&<AccountPage onClose={()=>setShowAccount(false)}/>}
       {showTrade&&(
         <ManualTrade
           pairs={pairs}
