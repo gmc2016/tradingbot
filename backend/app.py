@@ -349,6 +349,27 @@ def run_scan():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/demo/reset', methods=['POST'])
+@login_required
+def reset_demo():
+    """Clear all demo trades and reset demo balance to starting amount."""
+    try:
+        from db.database import get_conn, get_setting, set_setting
+        from bot.engine import _demo
+        conn = get_conn()
+        # Delete all demo trades
+        deleted = conn.execute("DELETE FROM trades WHERE mode='demo'").rowcount
+        conn.commit(); conn.close()
+        # Reset in-memory demo balance
+        starting = float(get_setting('starting_balance') or 1000)
+        _demo['balance'] = starting
+        _demo['init']    = True
+        push()
+        logger.info(f'Demo reset: deleted {deleted} trades, balance reset to {starting}')
+        return jsonify({'ok': True, 'deleted_trades': deleted, 'new_balance': starting})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/brain/log')
 @login_required
 def brain_log():
