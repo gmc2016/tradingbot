@@ -18,6 +18,20 @@ def get_anthropic_key():
     from db.database import get_setting
     return get_setting('anthropic_api_key') or ''
 
+def is_quality_pair(symbol):
+    """Filter out low-quality, suspicious, or untradeable pairs."""
+    coin = symbol.replace('/USDT', '')
+    # Must be ASCII only (no Chinese/non-Latin characters)
+    try:
+        coin.encode('ascii')
+    except UnicodeEncodeError:
+        return False
+    # Must be reasonable length
+    if len(coin) < 2 or len(coin) > 10: return False
+    # Must be all alphanumeric
+    if not coin.replace('_','').isalnum(): return False
+    return True
+
 def fetch_all_usdt_tickers():
     """Get all USDT spot pairs from Binance public API (no auth needed)."""
     try:
@@ -31,10 +45,11 @@ def fetch_all_usdt_tickers():
         for symbol, t in tickers.items():
             if not symbol.endswith('/USDT'): continue
             if symbol in EXCLUDE: continue
+            if not is_quality_pair(symbol): continue
             vol   = t.get('quoteVolume', 0) or 0
             price = t.get('last', 0) or 0
             chg   = t.get('percentage', 0) or 0
-            if vol < 1_000_000: continue   # min $1M 24h volume
+            if vol < 5_000_000: continue   # min $5M 24h volume (raised from $1M)
             if price <= 0: continue
             pairs.append({
                 'symbol':    symbol,
@@ -45,7 +60,7 @@ def fetch_all_usdt_tickers():
                 'low_24h':    t.get('low',  price),
             })
         pairs.sort(key=lambda x: x['volume_24h'], reverse=True)
-        logger.info(f'Scanner: fetched {len(pairs)} USDT pairs')
+        logger.info(f'Scanner: fetched {len(pairs)} quality USDT pairs')
         return pairs
     except Exception as e:
         logger.error(f'Scanner fetch error: {e}')
