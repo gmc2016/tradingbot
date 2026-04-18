@@ -262,5 +262,9 @@ def get_dashboard_data():
             'use_llm_filter':        _s('use_llm_filter','true'),
             'mtf_enabled':           _s('mtf_enabled','true'),
             'anthropic_key_set':     bool(_s('anthropic_api_key','')),
+            'scanner_enabled':       _s('scanner_enabled','true'),
+            'scanner_auto_update':   _s('scanner_auto_update','true'),
+            'last_scan_at':          _s('last_scan_at',''),
+            'pinned_pairs':          _s('pinned_pairs','BTC/USDT,ETH/USDT'),
         }
     }
