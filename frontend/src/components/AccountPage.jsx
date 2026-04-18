@@ -1,0 +1,149 @@
+import React, { useState, useEffect } from 'react'
+import axios from 'axios'
+
+export default function AccountPage({ onClose }) {
+  const [data,    setData]    = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState('')
+
+  const load = async () => {
+    setLoading(true); setError('')
+    try {
+      const r = await axios.get('/api/account', { withCredentials: true })
+      setData(r.data)
+    } catch(e) {
+      setError(e.response?.data?.error || 'Failed to load account data')
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [])
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'var(--bg-base)',zIndex:500,display:'flex',flexDirection:'column'}}>
+      <div style={{height:48,background:'var(--bg-surface)',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 20px',flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'center',gap:16}}>
+          <button onClick={onClose} style={{color:'var(--text-2)',fontSize:18}}>←</button>
+          <span style={{fontWeight:600,fontSize:15}}>Account & API Status</span>
+        </div>
+        <button onClick={load} style={{padding:'5px 14px',border:'1px solid var(--border)',borderRadius:6,fontSize:12,color:'var(--text-2)'}}>
+          Refresh
+        </button>
+      </div>
+
+      <div style={{flex:1,overflowY:'auto',padding:'24px 28px',maxWidth:900}}>
+        {loading&&<div style={{color:'var(--text-2)',padding:40,textAlign:'center'}}>Loading account data...</div>}
+        {error&&<div style={{background:'var(--red-bg)',border:'1px solid var(--red-dim)',borderRadius:6,padding:'10px 14px',color:'var(--red)',marginBottom:16}}>{error}</div>}
+
+        {data&&<>
+          {/* Key Status */}
+          <Section title="API Key Status">
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>
+              <KeyCard name="Binance" set={data.keys?.binance} desc="Required for live trading"/>
+              <KeyCard name="NewsAPI" set={data.keys?.newsapi} desc="News sentiment analysis"/>
+              <KeyCard name="Anthropic (Claude)" set={data.keys?.anthropic} desc="AI trade filtering" purple/>
+            </div>
+          </Section>
+
+          {/* Binance Balance */}
+          <Section title="Binance Account Balance">
+            {data.binance?.error ? (
+              <div style={{color:'var(--text-3)',fontSize:13}}>{data.binance.error}</div>
+            ) : data.binance ? (
+              <>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:16}}>
+                  <StatCard label="USDT Available" value={`$${(data.binance.usdt_free||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`} color="var(--green)"/>
+                  <StatCard label="USDT in Orders" value={`$${(data.binance.usdt_locked||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`} color="var(--amber)"/>
+                  <StatCard label="USDT Total" value={`$${(data.binance.usdt_total||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`}/>
+                </div>
+
+                {/* Other coin balances */}
+                {Object.keys(data.binance.balances||{}).filter(c=>c!=='USDT').length > 0 && (
+                  <div>
+                    <div style={{fontSize:11,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:.5,marginBottom:8}}>Other holdings</div>
+                    <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
+                      {Object.entries(data.binance.balances||{})
+                        .filter(([coin])=>coin!=='USDT')
+                        .map(([coin,bal])=>(
+                          <div key={coin} style={{background:'var(--bg-surface)',border:'1px solid var(--border)',borderRadius:6,padding:'6px 12px',fontSize:12}}>
+                            <span style={{fontWeight:600}}>{coin}</span>
+                            <span style={{color:'var(--text-3)',marginLeft:6}}>{bal.free.toFixed(6)}</span>
+                            {bal.used>0&&<span style={{color:'var(--amber)',marginLeft:4}}>({bal.used.toFixed(6)} locked)</span>}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+                {data.binance.fetched_at&&<div style={{fontSize:11,color:'var(--text-3)',marginTop:8}}>Last updated: {new Date(data.binance.fetched_at).toLocaleString()}</div>}
+              </>
+            ) : (
+              <div style={{color:'var(--text-3)',fontSize:13}}>Add Binance API keys in Settings to see balance</div>
+            )}
+          </Section>
+
+          {/* Claude AI Usage */}
+          <Section title="Claude AI Usage (this bot)">
+            {data.llm_stats?.error ? (
+              <div style={{color:'var(--text-3)',fontSize:13}}>{data.llm_stats.error}</div>
+            ) : (
+              <>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:12}}>
+                  <StatCard label="Trades filtered by AI" value={data.llm_stats?.trades_with_llm||0}/>
+                  <StatCard label="Trades blocked by AI" value={data.llm_stats?.trades_blocked_by_llm||0} color="var(--red)"/>
+                  <StatCard label="Today's AI calls" value={data.llm_stats?.today||0}/>
+                  <StatCard label="Est. cost (lifetime)" value={`$${(data.llm_stats?.estimated_cost_usd||0).toFixed(4)}`} color="var(--green)"/>
+                </div>
+                <div style={{background:'var(--bg-surface)',borderRadius:6,padding:'10px 12px',fontSize:12,color:'var(--text-2)',lineHeight:1.6}}>
+                  <div style={{marginBottom:4}}><b style={{color:'var(--text)'}}>Pricing:</b> claude-haiku-4-5 · $0.80/M input · $0.20/M output</div>
+                  <div style={{marginBottom:4}}><b style={{color:'var(--text)'}}>Per trade decision:</b> ~$0.00068 (less than 0.1 cent)</div>
+                  <div><b style={{color:'var(--text)'}}>$20 budget covers:</b> ~29,000 trade evaluations · typically 1-3 years of operation</div>
+                </div>
+              </>
+            )}
+          </Section>
+
+          {/* Mode warning */}
+          {data.mode==='demo'&&(
+            <div style={{background:'var(--blue-bg)',border:'1px solid rgba(59,130,246,.25)',borderRadius:8,padding:'12px 16px',fontSize:13,color:'var(--text-2)',lineHeight:1.6}}>
+              <b style={{color:'var(--blue)'}}>Currently in Demo mode.</b> Binance balance shows your real account balance (if API keys are set) but no real trades are being executed.
+              When you switch to Live mode, the bot will use your real USDT balance.
+            </div>
+          )}
+          {data.mode==='live'&&(
+            <div style={{background:'var(--red-bg)',border:'1px solid var(--red-dim)',borderRadius:8,padding:'12px 16px',fontSize:13,color:'var(--red)',lineHeight:1.6}}>
+              <b>⚠ Currently in LIVE mode.</b> Real orders are being executed on your Binance account.
+            </div>
+          )}
+        </>}
+      </div>
+    </div>
+  )
+}
+
+function Section({title, children}){
+  return <div style={{marginBottom:28}}>
+    <div style={{fontSize:13,fontWeight:600,color:'var(--text)',marginBottom:12,paddingBottom:6,borderBottom:'1px solid var(--border)'}}>{title}</div>
+    {children}
+  </div>
+}
+
+function KeyCard({name,set,desc,purple}){
+  return <div style={{background:'var(--bg-card)',border:`1px solid ${set?(purple?'rgba(168,85,247,.3)':'var(--green-dim)'):'var(--border)'}`,borderRadius:8,padding:'12px 14px'}}>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
+      <span style={{fontWeight:600,fontSize:13}}>{name}</span>
+      <span style={{fontSize:11,padding:'2px 7px',borderRadius:10,fontWeight:600,
+        background:set?(purple?'rgba(168,85,247,.15)':'var(--green-bg)'):'var(--bg-hover)',
+        color:set?(purple?'#a855f7':'var(--green)'):'var(--text-3)'}}>
+        {set?'✓ Set':'Not set'}
+      </span>
+    </div>
+    <div style={{fontSize:11,color:'var(--text-3)'}}>{desc}</div>
+  </div>
+}
+
+function StatCard({label,value,color}){
+  return <div style={{background:'var(--bg-surface)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 14px'}}>
+    <div style={{fontSize:11,color:'var(--text-3)',marginBottom:4}}>{label}</div>
+    <div style={{fontSize:20,fontWeight:700,color:color||'var(--text)'}}>{value}</div>
+  </div>
+}
