@@ -30,7 +30,7 @@ def init_db():
         ('max_positions','5'), ('stop_loss_pct','1.5'), ('take_profit_pct','3.0'),
         ('position_size_usdt','100'),
         ('trading_mode', os.environ.get('TRADING_MODE','demo')),
-        ('active_pairs','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,XRP/USDT'),
+        ('active_pairs','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT'),
         ('bot_running','false'), ('starting_balance','1000'),
         ('trailing_stop_enabled','true'), ('trailing_stop_pct','0.8'),
         ('partial_close_enabled','true'), ('partial_close_at_pct','1.5'),
@@ -39,7 +39,7 @@ def init_db():
         ('use_llm_filter','false'), ('mtf_enabled','false'),
         ('scanner_enabled','true'), ('scanner_interval_hours','6'),
         ('scanner_auto_update','true'), ('scanner_top_n','8'),
-        ('pinned_pairs','BTC/USDT,ETH/USDT'),
+        ('pinned_pairs','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT'),
         ('last_scan_at',''), ('last_scan_result',''),
         ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
         ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
@@ -52,7 +52,7 @@ def init_db():
         ('use_llm_filter','false'), ('mtf_enabled','false'),
         ('scanner_enabled','true'), ('scanner_auto_update','true'),
         ('scanner_top_n','8'), ('scanner_interval_hours','6'),
-        ('pinned_pairs','BTC/USDT,ETH/USDT'),
+        ('pinned_pairs','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT'),
         ('last_scan_at',''), ('last_scan_result',''),
         ('strategy_mode','combined'), ('max_loss_streak','3'),
         ('cooldown_minutes','60'), ('trailing_stop_enabled','true'),
@@ -64,6 +64,20 @@ def init_db():
         ('binance_api_secret',os.environ.get('BINANCE_API_SECRET','')),
         ('newsapi_key',       os.environ.get('NEWSAPI_KEY','')),
     ]
+    # Force reset pairs if they contain known micro-cap junk from scanner
+    try:
+        current_pairs = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
+        if current_pairs:
+            pairs = current_pairs[0] or ''
+            junk  = ['SPK','GUN','CFG','PROM','UTK','HIGH','SUPER','GIGGLE',
+                     'AUDIO','ONT','ALICE','PORTAL','MOVR','ENJ','ORDI']
+            if any(j+'/' in pairs for j in junk):
+                c.execute("UPDATE settings SET value=? WHERE key='active_pairs'",
+                    ('BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT',))
+                c.execute("UPDATE settings SET value=? WHERE key='pinned_pairs'",
+                    ('BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT',))
+    except: pass
+
     for k, v in migration:
         c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (k, v))
 
