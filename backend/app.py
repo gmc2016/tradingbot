@@ -524,15 +524,6 @@ def run_brain():
         logger.error(f'Brain: {e}'); return jsonify({'error':str(e)}),500
 
 # ── Account ────────────────────────────────────────────────────────────────────
-@app.route('/api/macro')
-@login_required
-def macro_data():
-    try:
-        from ai.macro import get_macro_data
-        return jsonify(get_macro_data(force_refresh=request.args.get('refresh')=='1'))
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/api/account')
 @login_required
 def account():
