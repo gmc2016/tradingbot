@@ -15,6 +15,8 @@ import ScannerPanel  from './components/ScannerPanel'
 import AccountPage   from './components/AccountPage'
 import BrainPanel    from './components/BrainPanel'
 import ActivityLog   from './components/ActivityLog'
+import TickerStrip   from './components/TickerStrip'
+import WatchlistPanel from './components/WatchlistPanel'
 
 function Dashboard({ auth, logout }) {
   const { data, connected, prices, startBot, stopBot, setMode, runNow, refreshNews, updateSettings } = useDashboard()
@@ -26,7 +28,8 @@ function Dashboard({ auth, logout }) {
   const [showScanner,   setShowScanner]   = useState(false)
   const [showAccount,   setShowAccount]   = useState(false)
   const [showBrain,     setShowBrain]     = useState(false)
-  const [showActivity,  setShowActivity]  = useState(false)
+  const [showActivity,   setShowActivity]  = useState(false)
+  const [showWatchlist,  setShowWatchlist] = useState(false)
 
   const handleModeChange = (mode) => {
     if (mode === 'live') {
@@ -65,6 +68,7 @@ function Dashboard({ auth, logout }) {
     ['💰 Account',       () => setShowAccount(true)],
     ['🧠 AI Brain',      () => setShowBrain(true)],
     ['📡 Activity',      () => setShowActivity(true)],
+    ['👁 Watchlist',     () => setShowWatchlist(true)],
   ]
 
   return (
@@ -92,6 +96,12 @@ function Dashboard({ auth, logout }) {
         {data.last_update&&<span style={{fontSize:11,color:'var(--text-3)'}}>Updated {new Date(data.last_update).toLocaleTimeString()}</span>}
       </div>
 
+      <TickerStrip
+        pairs={pairs}
+        watchlist={data.watchlist||[]}
+        prices={prices}
+        onSelectPair={setSelectedPair}
+      />
       <div style={{flex:1,display:'flex',overflow:'hidden',minHeight:0}}>
         <Sidebar pairs={pairs} selectedPair={selectedPair} onSelectPair={setSelectedPair} balance={usdt_balance} config={config} mode={mode}/>
         <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minHeight:0}}>
@@ -109,6 +119,7 @@ function Dashboard({ auth, logout }) {
       {showAccount&&<AccountPage onClose={()=>setShowAccount(false)}/>}
       {showBrain&&<BrainPanel config={config} onClose={()=>setShowBrain(false)}/>}
       {showActivity&&<ActivityLog onClose={()=>setShowActivity(false)}/>}
+      {showWatchlist&&<WatchlistPanel onClose={()=>setShowWatchlist(false)} prices={prices} onSelectPair={setSelectedPair}/>}
       {showTrade&&(
         <ManualTrade
           pairs={pairs}
