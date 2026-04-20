@@ -20,6 +20,7 @@ init_db(); init_auth(); init_activity_log()
 from bot.engine import (scan_and_trade, get_dashboard_data, start_cache_refresh,
                          refresh_pair_cache, open_manual_trade, close_manual_trade)
 from bot.scanner import run_scanner, apply_scanner_results
+from bot.macro import fetch_all_macro, get_macro_risk_level
 from bot.account import get_full_account_status
 from ai.sentiment import fetch_and_analyze
 from ai.brain import run_brain_cycle, apply_brain_recommendations, get_brain_log
@@ -183,7 +184,10 @@ def bot_cycle():
     except Exception as e: logger.error(f'Bot: {e}')
 
 def news_cycle():
-    try: fetch_and_analyze(); push()
+    try:
+        fetch_and_analyze()
+        fetch_all_macro()  # Refresh macro cache alongside news
+        push()
     except Exception as e: logger.error(f'News: {e}')
 
 def cache_cycle():
@@ -408,6 +412,16 @@ def news(): return jsonify(get_news(20))
 @app.route('/api/news/refresh',methods=['POST'])
 @login_required
 def ref_news(): fetch_and_analyze(); push(); return jsonify({'ok':True})
+
+@app.route('/api/macro')
+@login_required
+def macro_data():
+    try:
+        macro = fetch_all_macro()
+        risk  = get_macro_risk_level(macro)
+        return jsonify({'macro': macro, 'risk': risk})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/watchlist', methods=['GET'])
 @login_required
