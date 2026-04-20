@@ -150,10 +150,10 @@ def signal_confluence(df, sentiment_score=50.0):
     sr = [r for s,w,r in signals if s=='SELL']
     total = bs + ss
 
-    # Require score >= 5 (raised from 4) for cleaner signals
-    if   bs >= 5 and bs > ss: sig='BUY';  conf=min(100,int(bs/total*100)); reason=' + '.join(br[:3])
-    elif ss >= 5 and ss > bs: sig='SELL'; conf=min(100,int(ss/total*100)); reason=' + '.join(sr[:3])
-    else:                     sig='HOLD'; conf=0; reason=f'Score too low (B:{bs} S:{ss}, need 5)'
+    # Threshold of 4 — proven to work from early trading data
+    if   bs >= 4 and bs > ss: sig='BUY';  conf=min(100,int(bs/total*100)); reason=' + '.join(br[:3])
+    elif ss >= 4 and ss > bs: sig='SELL'; conf=min(100,int(ss/total*100)); reason=' + '.join(sr[:3])
+    else:                     sig='HOLD'; conf=0; reason=f'Mixed signals (B:{bs} S:{ss})'
 
     atr = last['atr']
     if sig != 'HOLD' and pd.notna(atr):
