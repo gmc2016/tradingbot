@@ -275,6 +275,28 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
             </>}
             <Divider/>
             <Field label="Active trading pairs" hint="Current list — updated by scanner or manually">
+              <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:6}}>
+                {[
+                  ['Core 8','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT'],
+                  ['+ DeFi','AAVE/USDT,UNI/USDT,MATIC/USDT'],
+                  ['+ AI/L2','NEAR/USDT,ARB/USDT,OP/USDT'],
+                  ['12 Pairs','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,MATIC/USDT,NEAR/USDT,UNI/USDT'],
+                ].map(([label,pairs])=>(
+                  <button key={label} onClick={()=>{
+                    const current = f.active_pairs.split(',').map(p=>p.trim()).filter(Boolean)
+                    const add = pairs.split(',').filter(p=>!current.includes(p.trim()))
+                    if(label.startsWith('+')){
+                      set('active_pairs',[...current,...add].join(','))
+                    } else {
+                      set('active_pairs',pairs)
+                    }
+                  }} style={{
+                    padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:500,
+                    background:'var(--blue-bg)',color:'var(--blue)',
+                    border:'1px solid rgba(59,130,246,.2)',cursor:'pointer',
+                  }}>{label}</button>
+                ))}
+              </div>
               <textarea rows={6} value={f.active_pairs} onChange={e=>set('active_pairs',e.target.value)}
                 style={{resize:'vertical',fontFamily:'monospace',fontSize:12}}/>
               <Hint>
