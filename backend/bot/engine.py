@@ -166,7 +166,21 @@ def scan_and_trade():
                 if not approved or adj_conf<50: continue
                 conf=adj_conf; reason=f'{reason} | AI: {llm_reason}'
 
-            qty=calculate_quantity(pair,pos,price)
+            # Tiered position sizing based on signal confidence
+            # More confident = slightly larger position, less confident = smaller
+            if conf >= 85 and cfg['use_llm']:
+                # Both technical and AI agree strongly
+                tier_mult = 1.25
+            elif conf >= 85:
+                tier_mult = 1.15
+            elif conf >= 70:
+                tier_mult = 1.0
+            elif conf >= 55:
+                tier_mult = 0.8
+            else:
+                tier_mult = 0.75
+            tiered_pos = round(pos * tier_mult, 2)
+            qty=calculate_quantity(pair, tiered_pos, price)
 
             if sl_price and tp_price:
                 sl=sl_price; tp=tp_price
