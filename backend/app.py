@@ -199,25 +199,18 @@ def cache_cycle():
 def macro_cycle():
     """Refresh macro data every 15 min and log notable changes."""
     try:
-        from ai.macro import get_macro_data
-        from db.activitylog import log as alog
-        data  = get_macro_data(force_refresh=True)
-        sigs  = data.get('signals', {})
-        bias  = sigs.get('overall_bias', 'neutral')
-        fg    = data.get('FEAR_GREED', {})
-        sp    = data.get('SP500', {})
-        detail = {
-            'bias': bias,
-            'fear_greed': fg.get('value'),
-            'sp500_change': sp.get('change'),
-            'position_mult': sigs.get('position_mult', 1.0),
-            'suppress_buy': sigs.get('suppress_buy', False),
-        }
-        level = 'warning' if sigs.get('suppress_buy') or sigs.get('risk_level') == 'high' else 'info'
-        reasons = sigs.get('reasons', [])
-        msg = f'Macro update: {bias.upper()} | F&G:{fg.get("value","?")} SP500:{sp.get("change",0):+.1f}%'
-        if reasons: msg += f' — {reasons[0]}'
-        alog('system', msg, level=level, detail=detail)
+        from bot.macro import fetch_all_macro, get_macro_risk_level
+        macro  = fetch_all_macro()
+        risk   = get_macro_risk_level(macro)
+        fg     = macro.get('FEAR_GREED', {})
+        sp     = macro.get('SP500', {})
+        level  = 'warning' if risk['level'] in ('high','extreme') else 'info'
+        msg    = (f'Macro: {risk["level"].upper()} risk | '
+                  f'F&G:{fg.get("value","?")} '
+                  f'SP500:{sp.get("change_pct",0):+.1f}% '
+                  f'bias:{risk["bias"]}')
+        if risk['reasons']: msg += f' — {risk["reasons"][0]}'
+        alog('system', msg, level=level, detail=risk)
     except Exception as e: logger.debug(f'Macro cycle: {e}')
 
 def scanner_cycle():
@@ -253,6 +246,14 @@ start_cache_refresh()
 eventlet.spawn_after(3, start_price_stream)
 alog('system','Trading Bot started')
 logger.info('Trading Bot ready')
+
+# ── Compatibility shim — handles any old cached code calling get_macro_data ──
+def get_macro_data(*a, **kw):
+    try:
+        m = fetch_all_macro()
+        m['signals'] = get_macro_risk_level(m)
+        return m
+    except: return {}
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 @app.route('/api/auth/login',methods=['POST'])
