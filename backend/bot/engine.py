@@ -6,6 +6,7 @@ from db.database import (get_setting, set_setting, insert_trade, close_trade,
                           partial_close_trade, update_trailing_stop,
                           get_open_trades, get_recent_trades, get_stats, get_news)
 from db.activitylog import log as alog
+from bot.watchlist import check_watchlist_promotions, get_watchlist_data
 
 logger       = logging.getLogger(__name__)
 _demo        = {'balance':1000.0,'init':False}
@@ -125,6 +126,10 @@ def scan_and_trade():
     if _s('bot_running','false')!='true': return
     cfg=get_config(); mode=cfg['mode']
     alog('system',f"Scan cycle — mode:{mode} strategy:{cfg['strategy']} pairs:{len(get_pairs_list())}")
+    # Check watchlist for auto-promotion opportunities
+    promoted = check_watchlist_promotions()
+    if promoted > 0:
+        logger.info(f'Watchlist promoted {promoted} pair(s) to active')
     check_open_positions()
     open_t=get_open_trades(); open_pairs={t['pair'] for t in open_t}
     open_cnt=len(open_t)
@@ -288,8 +293,15 @@ def get_dashboard_data():
         for p in pairs_raw]
     bal=get_demo_balance() if mode=='demo' else get_balance().get('USDT',0)
     llm_today=get_llm_today_count()
+    # Get watchlist data using cached pairs to avoid extra calls
+    try:
+        watchlist_data = get_watchlist_data(cached_pairs=pair_data)
+    except:
+        watchlist_data = []
+
     return {
         'mode':mode, 'bot_running':_s('bot_running','false')=='true',
+        'watchlist': watchlist_data,
         'stats':get_stats(), 'open_trades':open_t, 'recent_trades':recent,
         'pairs':pair_data, 'news':get_news(15),
         'sentiments':_cache.get('sentiments',{}),
