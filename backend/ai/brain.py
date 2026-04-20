@@ -70,15 +70,18 @@ PERFORMANCE (24h): {get_performance_summary()}
 MARKET: {get_market_summary()}
 
 Rules for day trading (building balance slowly with daily wins):
-- If win rate <40% with 5+ trades → tighten confluence threshold or switch strategy
-- If market is ranging (ADX <20 most pairs) → use 'confluence' strategy
-- If market trending strongly → use 'donchian' for liquid pairs
-- If consecutive losses on pair → suggest pausing it
-- Good performance → slight take_profit increase
-- High volatility → slightly wider stop_loss
-- NEVER suggest stop_loss_pct >3.0 or <0.8
-- NEVER suggest take_profit_pct >8.0 or <1.5
-- If <5 trades in 24h → NO_CHANGE (insufficient data)
+- If <10 closed trades total → ALWAYS return NO_CHANGE (not enough data)
+- If 0 trades in 24h → NO_CHANGE (market not trading, don't tweak)
+- If win rate <40% with 10+ trades → suggest strategy change
+- If market ranging (all pairs HOLD) → use 'confluence', but DO NOT keep adjusting every cycle
+- If market trending → use 'donchian' for liquid pairs
+- If a pair has 3+ consecutive losses → add to pairs_to_pause
+- Only suggest adjustments if they meaningfully differ from current config (>0.2 change)
+- NEVER suggest stop_loss_pct >2.5 or <0.8
+- NEVER suggest take_profit_pct >6.0 or <1.5
+- NEVER reduce take_profit below stop_loss (must maintain positive risk/reward ratio)
+- Prefer NO_CHANGE over micro-adjustments — stability beats constant tweaking
+- If last 3 brain cycles all said ADJUST with no improvement → switch to NO_CHANGE
 
 Respond JSON only:
 {{"action":"ADJUST|NO_CHANGE","reasoning":"2 sentences max",
