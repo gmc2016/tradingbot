@@ -42,6 +42,7 @@ def init_db():
         ('pinned_pairs','BTC/USDT,ETH/USDT'),
         ('last_scan_at',''), ('last_scan_result',''),
         ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
+        ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
     ]
     for k, v in defaults:
         c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (k, v))
@@ -57,6 +58,7 @@ def init_db():
         ('cooldown_minutes','60'), ('trailing_stop_enabled','true'),
         ('partial_close_enabled','true'), ('max_positions','5'),
         ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
+        ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
         ('anthropic_api_key', os.environ.get('ANTHROPIC_API_KEY','')),
         ('binance_api_key',   os.environ.get('BINANCE_API_KEY','')),
         ('binance_api_secret',os.environ.get('BINANCE_API_SECRET','')),
