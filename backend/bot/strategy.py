@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 # Liquid coins — Donchian works well here (clean breakouts)
 LIQUID_COINS = {'BTC','ETH','BNB','SOL','XRP','ADA','DOGE','AVAX','DOT','MATIC',
-                'LINK','LTC','BCH','ETC','XLM','ATOM','UNI','AAVE','XAU','XAG'}
+                'LINK','LTC','BCH','ETC','XLM','ATOM','UNI','AAVE','XAU','XAG',
+                'NEAR','ARB','OP','FET','RENDER','COMP','MKR','OKB','CRV'}
 
 def compute_indicators(df):
     df    = df.copy()
