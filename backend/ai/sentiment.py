@@ -145,7 +145,13 @@ def get_pair_sentiment(pair):
         return cached['score']
 
     anthropic_key = get_anthropic_key()
-    if anthropic_key and rel:
+    # Skip LLM sentiment if bot is stopped (save API credits)
+    try:
+        from db.database import get_setting
+        bot_running = get_setting('bot_running') == 'true'
+    except: bot_running = True
+
+    if anthropic_key and rel and bot_running:
         # Use per-pair lock to prevent two threads calling LLM simultaneously
         pair_lock = _get_pair_lock(pair)
         if not pair_lock.acquire(blocking=False):
