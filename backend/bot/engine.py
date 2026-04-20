@@ -3,10 +3,12 @@ from bot.exchange import fetch_ohlcv, fetch_ticker, place_market_order, calculat
 from bot.strategy import generate_signal, set_cooldown, is_in_cooldown, is_liquid_coin
 from ai.sentiment import get_pair_sentiment, fetch_and_analyze, llm_trade_decision
 from db.database import (get_setting, set_setting, insert_trade, close_trade,
-                          partial_close_trade, update_trailing_stop,
+                          partial_close_trade, update_trailing_stop, update_trailing_tp,
                           get_open_trades, get_recent_trades, get_stats, get_news)
 from db.activitylog import log as alog
 from bot.watchlist import check_watchlist_promotions, get_watchlist_data
+from ai.macro import get_macro_trade_modifier, get_macro_data, scan_news_for_macro
+from ai.macro import get_macro_data, get_macro_summary_for_ai
 
 logger       = logging.getLogger(__name__)
 _demo        = {'balance':1000.0,'init':False}
@@ -75,12 +77,45 @@ def check_open_positions():
         sl=t['stop_loss']; tp=t['take_profit']; qty=t['quantity']; mode=t['mode']
         pnl_pct = (cp-entry)/entry if side=='BUY' else (entry-cp)/entry
 
-        # Partial close
-        if (cfg['partial_close'] and pnl_pct>=cfg['partial_close_at_pct']
-                and qty>0 and not t.get('trailing_stop')):
-            cqty=round(qty*cfg['partial_close_size'],8); rem=round(qty-cqty,8)
-            if cqty>0 and rem>0:
-                pp=(cp-entry)*cqty if side=='BUY' else (entry-cp)*cqty
+        # ── SMART TRAILING TAKE-PROFIT ────────────────────────────────────────
+        # As price rises, TP rises with it. When price drops a %, TP locks in.
+        # Example: entry $100, initial TP $103.
+        # Price rises to $105 → TP moves to $104.16 (0.8% below peak)
+        # Price rises to $108 → TP moves to $107.14
+        # Price drops to $107.14 → trade closes at profit, never waits endlessly
+        if cfg['trailing_stop'] and pnl_pct >= cfg['trailing_stop_pct']:
+            trail_dist = cfg['trailing_stop_pct']
+            if side == 'BUY':
+                # New TP = current price minus trail distance (locks in profit)
+                new_tp = round(cp * (1 - trail_dist), 8)
+                # Only move TP UP, never down — ratchet mechanism
+                if new_tp > tp:
+                    update_trailing_stop(t['id'], sl)  # also keep SL updated
+                    update_trailing_tp(t['id'], new_tp)
+                    alog('trade', f"Trail TP {t['pair']} raised → ${new_tp:.4f} (price:${cp:.4f})",
+                         detail={'pair':t['pair'],'new_tp':new_tp,'price':cp})
+                    tp = new_tp
+                # Also trail the stop loss up
+                new_sl = round(cp * (1 - trail_dist * 2), 8)  # SL stays 2x trail below
+                if new_sl > sl:
+                    update_trailing_stop(t['id'], new_sl); sl = new_sl
+            else:  # SELL
+                new_tp = round(cp * (1 + trail_dist), 8)
+                if new_tp < tp:
+                    update_trailing_tp(t['id'], new_tp)
+                    tp = new_tp
+                new_sl = round(cp * (1 + trail_dist * 2), 8)
+                if new_sl < sl:
+                    update_trailing_stop(t['id'], new_sl); sl = new_sl
+
+        # ── PARTIAL CLOSE ─────────────────────────────────────────────────────
+        # Take some profit early, let the rest ride with trailing
+        if (cfg['partial_close'] and pnl_pct >= cfg['partial_close_at_pct']
+                and qty > 0 and not t.get('trailing_stop')):
+            cqty = round(qty * cfg['partial_close_size'], 8)
+            rem  = round(qty - cqty, 8)
+            if cqty > 0 and rem > 0:
+                pp = (cp-entry)*cqty if side=='BUY' else (entry-cp)*cqty
                 try:
                     place_market_order(t['pair'],'SELL' if side=='BUY' else 'BUY',cqty,mode=mode)
                     partial_close_trade(t['id'],rem,pp)
@@ -89,38 +124,34 @@ def check_open_positions():
                          detail={'pair':t['pair'],'partial_pnl':round(pp,4),'remain_qty':rem})
                 except Exception as e: logger.error(f'Partial close: {e}')
 
-        # Trailing stop
-        if cfg['trailing_stop'] and pnl_pct>=cfg['trailing_stop_pct']:
-            if side=='BUY':
-                new_sl=round(cp*(1-cfg['trailing_stop_pct']),8)
-                if new_sl>sl: update_trailing_stop(t['id'],new_sl); sl=new_sl
-            else:
-                new_sl=round(cp*(1+cfg['trailing_stop_pct']),8)
-                if new_sl<sl: update_trailing_stop(t['id'],new_sl); sl=new_sl
-
-        # Full close at SL or TP
-        hit=(cp<=sl or cp>=tp) if side=='BUY' else (cp>=sl or cp<=tp)
+        # ── FULL CLOSE at SL or TP ─────────────────────────────────────────────
+        # For BUY: close if price drops to SL or rises above TP
+        # With trailing TP: TP moves up as price rises, so "hitting TP" means
+        # price dropped back to the trailing level = smart exit with locked profit
+        hit = (cp<=sl or cp>=tp) if side=='BUY' else (cp>=sl or cp<=tp)
         if hit:
-            pnl=(cp-entry)*qty if side=='BUY' else (entry-cp)*qty
+            pnl = (cp-entry)*qty if side=='BUY' else (entry-cp)*qty
             try: place_market_order(t['pair'],'SELL' if side=='BUY' else 'BUY',qty,mode=mode)
             except: continue
             close_trade(t['id'],cp,pnl)
             if mode=='demo': adj_demo(pnl)
-            closed_by='TP' if ((side=='BUY' and cp>=tp) or (side=='SELL' and cp<=tp)) else 'SL'
-            level='success' if pnl>=0 else 'warning'
-            alog('trade',f"CLOSED {side} {t['pair']} {closed_by} — PnL:{pnl:+.2f} USDT",
+            closed_by = 'TP' if ((side=='BUY' and cp>=tp) or (side=='SELL' and cp<=tp)) else 'SL'
+            # With trailing: closing at "TP" often means trailing stop triggered = profit locked
+            level = 'success' if pnl>=0 else 'warning'
+            label = 'Trail-TP' if (t.get('trailing_stop') and closed_by=='TP') else closed_by
+            alog('trade',f"CLOSED {side} {t['pair']} {label} — PnL:{pnl:+.2f} USDT",
                  level=level,
                  detail={'pair':t['pair'],'side':side,'pnl':round(pnl,4),
-                         'closed_by':closed_by,'exit_price':cp})
-            if pnl<0:
-                _loss_streak[t['pair']]=_loss_streak.get(t['pair'],0)+1
-                if _loss_streak[t['pair']]>=cfg['max_loss_streak']:
+                         'closed_by':label,'exit_price':cp,'entry':entry})
+            if pnl < 0:
+                _loss_streak[t['pair']] = _loss_streak.get(t['pair'],0) + 1
+                if _loss_streak[t['pair']] >= cfg['max_loss_streak']:
                     set_cooldown(t['pair'],cfg['cooldown_minutes'])
-                    _loss_streak[t['pair']]=0
+                    _loss_streak[t['pair']] = 0
                     alog('system',f"Cooldown: {t['pair']} paused {cfg['cooldown_minutes']}min",
                          level='warning')
             else:
-                _loss_streak[t['pair']]=0
+                _loss_streak[t['pair']] = 0
 
 def scan_and_trade():
     if _s('bot_running','false')!='true': return
@@ -159,6 +190,19 @@ def scan_and_trade():
                      'reason':reason,'sentiment':round(sent,1)})
 
         if sig in ('BUY','SELL') and conf>=55:
+            # Apply macro filters
+            try:
+                macro  = get_macro_data()
+                msigs  = macro.get('signals', {})
+                # Suppress buys on bad macro days
+                if sig == 'BUY' and msigs.get('suppress_buy'):
+                    alog('signal', f'{pair}: BUY suppressed by macro — {msigs["reasons"][0] if msigs.get("reasons") else "macro headwind"}', level='warning')
+                    continue
+                # Apply macro position size multiplier
+                macro_mult = msigs.get('position_mult', 1.0)
+            except:
+                macro_mult = 1.0
+
             ticker=fetch_ticker(pair)
             if not ticker: continue
             price=ticker['last']; pos=cfg['position_size_usdt']
@@ -171,10 +215,8 @@ def scan_and_trade():
                 if not approved or adj_conf<50: continue
                 conf=adj_conf; reason=f'{reason} | AI: {llm_reason}'
 
-            # Tiered position sizing based on signal confidence
-            # More confident = slightly larger position, less confident = smaller
+            # Tiered position sizing × macro multiplier
             if conf >= 85 and cfg['use_llm']:
-                # Both technical and AI agree strongly
                 tier_mult = 1.25
             elif conf >= 85:
                 tier_mult = 1.15
@@ -184,7 +226,9 @@ def scan_and_trade():
                 tier_mult = 0.8
             else:
                 tier_mult = 0.75
-            tiered_pos = round(pos * tier_mult, 2)
+            tiered_pos = round(pos * tier_mult * macro_mult, 2)
+            if macro_mult != 1.0:
+                logger.info(f'{pair}: macro size mult={macro_mult}x → ${tiered_pos}')
             qty=calculate_quantity(pair, tiered_pos, price)
 
             if sl_price and tp_price:
@@ -304,8 +348,15 @@ def get_dashboard_data():
     # Watchlist data from cache only — refreshed during scan cycle
     watchlist_data = _cache.get('watchlist', [])
 
+    # Get macro data for dashboard
+    try:
+        macro_data = get_macro_data()
+    except:
+        macro_data = None
+
     return {
         'mode':mode, 'bot_running':_s('bot_running','false')=='true',
+        'macro': macro_data,
         'watchlist': watchlist_data,
         'stats':get_stats(), 'open_trades':open_t, 'recent_trades':recent,
         'pairs':pair_data, 'news':get_news(15),
@@ -314,6 +365,16 @@ def get_dashboard_data():
         'last_update':_cache.get('last_update'),
         'llm_today':   llm_today,
         'llm_cost_today': round(llm_today*0.00068,4),
+        'macro': (lambda m: {
+            'fear_greed': m.get('FEAR_GREED'),
+            'sp500':      m.get('SP500'),
+            'nasdaq':     m.get('NASDAQ'),
+            'gold':       m.get('GOLD'),
+            'oil':        m.get('OIL_WTI'),
+            'dxy':        m.get('DXY'),
+            'vix':        m.get('VIX'),
+            'signals':    m.get('signals',{}),
+        })(get_macro_data()),
         'config':{
             'max_positions':         cfg['max_positions'],
             'stop_loss_pct':         _s('stop_loss_pct','1.5'),
