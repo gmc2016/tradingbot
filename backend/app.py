@@ -63,8 +63,11 @@ def login_required(f):
         return f(*a,**kw)
     return dec
 
-# ── Price stream ───────────────────────────────────────────────────────────────
-_prices = {}; _ws_thread = None
+# ── Price stream + Kline stream ───────────────────────────────────────────────
+_prices       = {}
+_ws_thread    = None
+_kline_subs   = {}   # symbol -> timeframe currently subscribed
+_kline_thread = None
 
 def start_price_stream():
     global _ws_thread
@@ -94,6 +97,54 @@ def start_price_stream():
                 on_open=lambda ws:logger.info('Price stream connected')).run_forever(ping_interval=20)
         except Exception as e: logger.error(f'WS: {e}')
     _ws_thread=threading.Thread(target=run,daemon=True); _ws_thread.start()
+
+# Kline (candle) streams — proxied from Binance through backend to avoid browser CSP blocks
+_kline_ws     = {}   # symbol+tf -> websocket
+_kline_thread_map = {}
+
+def subscribe_kline(symbol, timeframe='1h'):
+    """Subscribe to a kline stream and push updates to frontend via SocketIO."""
+    key = f'{symbol}_{timeframe}'
+    # Close existing if switching
+    if key in _kline_ws:
+        try: _kline_ws[key].close()
+        except: pass
+    import websocket as ws_lib
+    stream = symbol.replace('/','').lower()
+    url    = f'wss://stream.binance.com:9443/ws/{stream}@kline_{timeframe}'
+
+    def on_msg(ws, msg):
+        try:
+            data = json.loads(msg)
+            k    = data.get('k',{})
+            if not k: return
+            pair = symbol
+            candle = {
+                'time':  k['t'] // 1000,
+                'open':  float(k['o']), 'high': float(k['h']),
+                'low':   float(k['l']), 'close':float(k['c']),
+                'volume':float(k['v']), 'closed': k['x'],
+            }
+            socketio.emit('kline_update', {'pair': pair, 'tf': timeframe, 'candle': candle})
+        except: pass
+
+    def on_close(ws, *a):
+        eventlet.sleep(3)
+        subscribe_kline(symbol, timeframe)
+
+    def run():
+        try:
+            ws = ws_lib.WebSocketApp(url, on_message=on_msg,
+                on_error=lambda ws,e: None, on_close=on_close)
+            _kline_ws[key] = ws
+            ws.run_forever(ping_interval=20)
+        except Exception as e:
+            logger.debug(f'Kline WS {symbol}: {e}')
+
+    t = threading.Thread(target=run, daemon=True)
+    _kline_thread_map[key] = t
+    t.start()
+    logger.info(f'Kline stream started: {symbol} {timeframe}')
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 def push():
@@ -289,6 +340,15 @@ def news(): return jsonify(get_news(20))
 @app.route('/api/news/refresh',methods=['POST'])
 @login_required
 def ref_news(): fetch_and_analyze(); push(); return jsonify({'ok':True})
+
+@app.route('/api/kline/subscribe', methods=['POST'])
+@login_required
+def kline_subscribe():
+    data = request.json or {}
+    symbol    = data.get('symbol','BTC/USDT')
+    timeframe = data.get('timeframe','1h')
+    subscribe_kline(symbol, timeframe)
+    return jsonify({'ok': True, 'symbol': symbol, 'timeframe': timeframe})
 
 @app.route('/api/ohlcv')
 @login_required
