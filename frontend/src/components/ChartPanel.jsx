@@ -4,14 +4,19 @@ import axios from 'axios'
 import { io } from 'socket.io-client'
 
 const TIMEFRAMES = ['15m','1h','4h','1d']
+const TF_SECONDS = {'15m':900,'1h':3600,'4h':14400,'1d':86400}
 
 export default function ChartPanel({ symbol='BTC/USDT', trades=[] }) {
-  const containerRef = useRef(null)
-  const chartRef     = useRef(null)
-  const candleRef    = useRef(null)
-  const volRef       = useRef(null)
-  const socketRef    = useRef(null)
-  const obWsRef      = useRef(null)
+  const containerRef  = useRef(null)
+  const chartRef      = useRef(null)
+  const candleRef     = useRef(null)
+  const volRef        = useRef(null)
+  const socketRef     = useRef(null)
+  const obWsRef       = useRef(null)
+
+  // Track current candle state for live price updates
+  const currentCandle = useRef(null)  // {time, open, high, low, close, volume}
+
   const [tf,        setTf]       = useState('1h')
   const [loading,   setLoading]  = useState(false)
   const [lastPrice, setLastPrice]= useState(null)
@@ -21,10 +26,9 @@ export default function ChartPanel({ symbol='BTC/USDT', trades=[] }) {
   const [liveTag,   setLiveTag]  = useState(false)
 
   const fmtPrice = p =>
-    !p ? '—' : p<0.01 ? p.toFixed(6) : p<1 ? p.toFixed(4) :
-    p<100 ? p.toFixed(2) : p.toLocaleString('en-US',{maximumFractionDigits:2})
+    !p ? '—' : p<0.001?p.toFixed(6):p<1?p.toFixed(4):p<100?p.toFixed(2):
+    p>=1000?p.toLocaleString('en-US',{maximumFractionDigits:2}):p.toFixed(2)
 
-  // Load historical candles via backend REST
   const loadData = useCallback(async (sym, timeframe) => {
     setLoading(true)
     try {
@@ -33,40 +37,47 @@ export default function ChartPanel({ symbol='BTC/USDT', trades=[] }) {
       if (!r.data?.length || !candleRef.current) return
 
       const candles = r.data
-        .map(d=>({time:Math.floor(new Date(d.timestamp).getTime()/1000),
-          open:parseFloat(d.open),high:parseFloat(d.high),
-          low:parseFloat(d.low),close:parseFloat(d.close)}))
-        .filter(d=>d.time&&!isNaN(d.close)).sort((a,b)=>a.time-b.time)
+        .map(d=>({
+          time: Math.floor(new Date(d.timestamp).getTime()/1000),
+          open: parseFloat(d.open), high: parseFloat(d.high),
+          low:  parseFloat(d.low),  close:parseFloat(d.close),
+        }))
+        .filter(d=>d.time&&!isNaN(d.close))
+        .sort((a,b)=>a.time-b.time)
 
       const volumes = r.data
-        .map(d=>({time:Math.floor(new Date(d.timestamp).getTime()/1000),
-          value:parseFloat(d.volume),
-          color:parseFloat(d.close)>=parseFloat(d.open)
-            ?'rgba(20,184,166,0.3)':'rgba(239,68,68,0.3)'}))
-        .filter(d=>d.time&&!isNaN(d.value)).sort((a,b)=>a.time-b.time)
+        .map(d=>({
+          time:  Math.floor(new Date(d.timestamp).getTime()/1000),
+          value: parseFloat(d.volume),
+          color: parseFloat(d.close)>=parseFloat(d.open)
+            ?'rgba(20,184,166,0.3)':'rgba(239,68,68,0.3)',
+        }))
+        .filter(d=>d.time&&!isNaN(d.value))
+        .sort((a,b)=>a.time-b.time)
 
       candleRef.current.setData(candles)
       if (volRef.current) volRef.current.setData(volumes)
       chartRef.current?.timeScale().fitContent()
 
-      if (candles.length>0){
-        const last=candles[candles.length-1]
-        const prev=candles[candles.length-2]
+      // Seed current candle tracker with last candle
+      if (candles.length > 0) {
+        const last = candles[candles.length-1]
+        const prev = candles[candles.length-2]
+        currentCandle.current = { ...last, volume: parseFloat(r.data[r.data.length-1]?.volume||0) }
         setLastPrice(last.close)
         setPriceChg(prev?((last.close-prev.close)/prev.close*100):0)
       }
-    } catch(e){console.error('Chart load:',e)}
+    } catch(e){console.error('Chart:',e)}
     setLoading(false)
   },[])
 
-  // Tell backend to start kline WebSocket stream for this symbol+tf
   const subscribeKline = useCallback(async (sym, timeframe) => {
     try {
       await axios.post('/api/kline/subscribe',{symbol:sym,timeframe},{withCredentials:true})
-    } catch(e){ console.debug('Kline subscribe:',e) }
+    } catch(e){}
   },[])
 
-  // Init chart once
+  // Init chart
   useEffect(()=>{
     if (!containerRef.current) return
     const chart = createChart(containerRef.current,{
@@ -78,110 +89,154 @@ export default function ChartPanel({ symbol='BTC/USDT', trades=[] }) {
       width:containerRef.current.clientWidth,
       height:containerRef.current.clientHeight,
     })
-    const candles=chart.addCandlestickSeries({
+    const candles = chart.addCandlestickSeries({
       upColor:'#14b8a6',downColor:'#ef4444',
       borderUpColor:'#14b8a6',borderDownColor:'#ef4444',
       wickUpColor:'#14b8a6',wickDownColor:'#ef4444',
     })
-    const vol=chart.addHistogramSeries({
+    const vol = chart.addHistogramSeries({
       priceFormat:{type:'volume'},priceScaleId:'vol',
       scaleMargins:{top:0.85,bottom:0},
     })
     chartRef.current=chart; candleRef.current=candles; volRef.current=vol
+
     const ro=new ResizeObserver(entries=>{
       const{width,height}=entries[0].contentRect
       chart.applyOptions({width,height})
     })
     ro.observe(containerRef.current)
 
-    // Connect to backend SocketIO for kline updates
+    // SocketIO connection for kline updates + price updates
     const socket=io({path:'/socket.io',transports:['websocket','polling']})
     socketRef.current=socket
-    socket.on('kline_update',({pair,tf:stf,candle})=>{
+
+    // kline_update: full candle from Binance kline stream (every ~1-2 sec)
+    socket.on('kline_update',({pair,candle})=>{
       if (pair!==symbol||!candleRef.current) return
       try {
-        const t = Math.floor(Number(candle.time))  // ensure integer seconds
-        candleRef.current.update({
-          time:t,open:candle.open,high:candle.high,
-          low:candle.low,close:candle.close,
-        })
+        const t=Math.floor(Number(candle.time))
+        const c = {time:t,open:candle.open,high:candle.high,low:candle.low,close:candle.close}
+        candleRef.current.update(c)
         if (volRef.current) volRef.current.update({
           time:t,value:candle.volume||0,
           color:candle.close>=candle.open?'rgba(20,184,166,0.3)':'rgba(239,68,68,0.3)',
         })
+        // Update our candle tracker
+        currentCandle.current = {...c, volume: candle.volume||0}
         setLastPrice(candle.close)
         setLiveTag(true)
-      } catch(e){ console.debug('kline update:',e) }
+      } catch(e){}
     })
 
-    // Also update price from the existing price_update events
+    // price_update: instant tick from miniTicker WebSocket (sub-second)
+    // Use this to update the current candle close price in real time
+    // This makes the chart match the order book price exactly
     socket.on('price_update',({pair,price,change})=>{
-      if (pair===symbol){
-        setLastPrice(price); setPriceChg(change)
+      if (pair!==symbol||!candleRef.current) return
+      setLastPrice(price)
+      setPriceChg(change)
+      setLiveTag(true)
+
+      // Update current candle close with live price
+      if (currentCandle.current) {
+        const updated = {
+          time:  currentCandle.current.time,
+          open:  currentCandle.current.open,
+          high:  Math.max(currentCandle.current.high, price),
+          low:   Math.min(currentCandle.current.low,  price),
+          close: price,  // ← live price, matches order book exactly
+        }
+        try {
+          candleRef.current.update(updated)
+          currentCandle.current = { ...updated, volume: currentCandle.current.volume }
+        } catch(e){}
       }
     })
 
     return ()=>{
       ro.disconnect(); chart.remove(); chartRef.current=null
       socket.disconnect()
-      if (obWsRef.current){ obWsRef.current.close(); obWsRef.current=null }
+      if(obWsRef.current){obWsRef.current.close();obWsRef.current=null}
     }
   // eslint-disable-next-line
   },[])
 
-  // Load data + subscribe kline when symbol or tf changes
+  // Reload when symbol/tf changes
   useEffect(()=>{
-    if (candleRef.current){
+    if(candleRef.current){
       setLiveTag(false)
+      currentCandle.current = null
       loadData(symbol,tf)
       subscribeKline(symbol,tf)
     }
   },[symbol,tf,loadData,subscribeKline])
 
-  // Update socket listener when symbol changes
+  // Update kline listener when symbol changes
   useEffect(()=>{
-    if (!socketRef.current) return
+    if(!socketRef.current) return
     socketRef.current.off('kline_update')
     socketRef.current.on('kline_update',({pair,candle})=>{
-      if (pair!==symbol||!candleRef.current) return
-      try {
+      if(pair!==symbol||!candleRef.current) return
+      try{
         const t=Math.floor(Number(candle.time))
-        candleRef.current.update({time:t,open:candle.open,high:candle.high,low:candle.low,close:candle.close})
-        if (volRef.current) volRef.current.update({time:t,value:candle.volume||0,
-          color:candle.close>=candle.open?'rgba(20,184,166,0.3)':'rgba(239,68,68,0.3)'})
+        const c={time:t,open:candle.open,high:candle.high,low:candle.low,close:candle.close}
+        candleRef.current.update(c)
+        if(volRef.current) volRef.current.update({
+          time:t,value:candle.volume||0,
+          color:candle.close>=candle.open?'rgba(20,184,166,0.3)':'rgba(239,68,68,0.3)',
+        })
+        currentCandle.current={...c,volume:candle.volume||0}
         setLastPrice(candle.close); setLiveTag(true)
-      } catch(e){ console.debug('kline:',e) }
+      }catch(e){}
+    })
+    socketRef.current.off('price_update')
+    socketRef.current.on('price_update',({pair,price,change})=>{
+      if(pair!==symbol||!candleRef.current) return
+      setLastPrice(price); setPriceChg(change); setLiveTag(true)
+      if(currentCandle.current){
+        const u={
+          time: currentCandle.current.time,
+          open: currentCandle.current.open,
+          high: Math.max(currentCandle.current.high,price),
+          low:  Math.min(currentCandle.current.low, price),
+          close:price,
+        }
+        try{
+          candleRef.current.update(u)
+          currentCandle.current={...u,volume:currentCandle.current.volume}
+        }catch(e){}
+      }
     })
   },[symbol])
 
-  // Order book via direct Binance WS (depth data, not blocked by CSP usually)
+  // Order book via direct WebSocket
   const connectOB = useCallback((sym)=>{
-    if (obWsRef.current){ obWsRef.current.close(); obWsRef.current=null }
+    if(obWsRef.current){obWsRef.current.close();obWsRef.current=null}
     const stream=sym.replace('/','').toLowerCase()
-    try {
+    try{
       const ws=new WebSocket(`wss://stream.binance.com:9443/ws/${stream}@depth10@100ms`)
       ws.onmessage=(e)=>{
-        try {
+        try{
           const d=JSON.parse(e.data)
           setOrderBook({
             bids:(d.bids||[]).slice(0,12).map(([p,q])=>({price:parseFloat(p),qty:parseFloat(q)})),
             asks:(d.asks||[]).slice(0,12).map(([p,q])=>({price:parseFloat(p),qty:parseFloat(q)})),
           })
-        } catch{}
+        }catch{}
       }
       ws.onerror=()=>setTimeout(()=>connectOB(sym),3000)
       obWsRef.current=ws
-    } catch(e){ console.debug('OB WS:',e) }
+    }catch(e){}
   },[])
 
   useEffect(()=>{
-    if (showOB) connectOB(symbol)
-    else if (obWsRef.current){ obWsRef.current.close(); obWsRef.current=null }
+    if(showOB) connectOB(symbol)
+    else if(obWsRef.current){obWsRef.current.close();obWsRef.current=null}
   },[showOB,symbol,connectOB])
 
   // Trade markers
   useEffect(()=>{
-    if (!candleRef.current||!trades?.length) return
+    if(!candleRef.current||!trades?.length) return
     const markers=trades
       .filter(t=>t.pair===symbol&&t.entry_price)
       .map(t=>({
@@ -192,7 +247,7 @@ export default function ChartPanel({ symbol='BTC/USDT', trades=[] }) {
         text:`${t.side}${t.pnl!=null?' '+(t.pnl>=0?'+':'')+t.pnl.toFixed(2):''}`,
       }))
       .sort((a,b)=>a.time-b.time)
-    if (markers.length) candleRef.current.setMarkers(markers)
+    if(markers.length) candleRef.current.setMarkers(markers)
   },[trades,symbol])
 
   const isUp=priceChg>=0
@@ -205,25 +260,26 @@ export default function ChartPanel({ symbol='BTC/USDT', trades=[] }) {
   return (
     <div style={{flex:1,display:'flex',overflow:'hidden',minHeight:0}}>
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minHeight:0}}>
-        {/* Chart header */}
+        {/* Header */}
         <div style={{display:'flex',alignItems:'center',gap:10,padding:'5px 12px',
           background:'var(--bg-surface)',borderBottom:'1px solid var(--border)',flexShrink:0}}>
           <span style={{fontWeight:600,fontSize:13}}>{symbol}</span>
           {lastPrice&&<>
-            <span style={{fontSize:14,fontWeight:700,fontFamily:'monospace',
+            <span style={{fontSize:15,fontWeight:700,fontFamily:'monospace',
               color:isUp?'var(--green)':'var(--red)'}}>
-              {fmtPrice(lastPrice)}
+              ${fmtPrice(lastPrice)}
             </span>
             <span style={{fontSize:11,color:isUp?'var(--green)':'var(--red)',fontWeight:500}}>
               {isUp?'+':''}{typeof priceChg==='number'?priceChg.toFixed(2):'0.00'}%
             </span>
-            <span style={{fontSize:10,color:liveTag?'var(--green)':'var(--text-3)',
+            <span style={{fontSize:10,
+              color:liveTag?'var(--green)':'var(--text-3)',
               background:liveTag?'rgba(20,184,166,.1)':'transparent',
-              padding:'1px 5px',borderRadius:3,transition:'all .3s'}}>
-              {liveTag?'● LIVE':'◌ loading...'}
+              padding:'1px 6px',borderRadius:3}}>
+              {liveTag?'● LIVE':'◌ connecting...'}
             </span>
           </>}
-          {loading&&<span style={{fontSize:11,color:'var(--text-3)'}}>fetching candles...</span>}
+          {loading&&<span style={{fontSize:11,color:'var(--text-3)'}}>loading...</span>}
           <div style={{marginLeft:'auto',display:'flex',gap:4,alignItems:'center'}}>
             {TIMEFRAMES.map(t=>(
               <button key={t} onClick={()=>setTf(t)} style={{
@@ -257,57 +313,40 @@ export default function ChartPanel({ symbol='BTC/USDT', trades=[] }) {
             <span>Price (USDT)</span><span style={{textAlign:'right'}}>Amount</span>
           </div>
           <div style={{flex:1,overflow:'hidden',display:'flex',flexDirection:'column'}}>
-            {/* Asks - sell orders (red) reversed so lowest is at bottom */}
             <div style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'flex-end',overflow:'hidden'}}>
               {[...(orderBook.asks||[])].reverse().map((a,i)=>(
-                <div key={i} style={{position:'relative',padding:'1px 8px',
-                  display:'grid',gridTemplateColumns:'1fr 1fr'}}>
+                <div key={i} style={{position:'relative',padding:'1px 8px',display:'grid',gridTemplateColumns:'1fr 1fr'}}>
                   <div style={{position:'absolute',right:0,top:0,bottom:0,
-                    width:`${Math.min((a.qty/maxAsk)*100,100)}%`,
-                    background:'rgba(239,68,68,0.15)'}}/>
-                  <span style={{color:'var(--red)',fontFamily:'monospace',fontSize:10,position:'relative'}}>
-                    {fmtPrice(a.price)}
-                  </span>
-                  <span style={{textAlign:'right',color:'var(--text-2)',fontFamily:'monospace',
-                    fontSize:10,position:'relative'}}>
-                    {a.qty.toFixed(3)}
-                  </span>
+                    width:`${Math.min((a.qty/maxAsk)*100,100)}%`,background:'rgba(239,68,68,0.15)'}}/>
+                  <span style={{color:'var(--red)',fontFamily:'monospace',fontSize:10,position:'relative'}}>{fmtPrice(a.price)}</span>
+                  <span style={{textAlign:'right',color:'var(--text-2)',fontFamily:'monospace',fontSize:10,position:'relative'}}>{a.qty.toFixed(3)}</span>
                 </div>
               ))}
             </div>
-            {/* Spread / mid price */}
             {lastPrice&&(
               <div style={{padding:'4px 8px',background:'var(--bg-hover)',
                 border:'1px solid var(--border)',textAlign:'center',
                 fontWeight:700,fontSize:12,flexShrink:0,
                 color:isUp?'var(--green)':'var(--red)'}}>
-                {fmtPrice(lastPrice)} {isUp?'▲':'▼'}
+                ${fmtPrice(lastPrice)} {isUp?'▲':'▼'}
               </div>
             )}
-            {/* Bids - buy orders (green) */}
             <div style={{flex:1,overflow:'hidden'}}>
               {(orderBook.bids||[]).map((b,i)=>(
-                <div key={i} style={{position:'relative',padding:'1px 8px',
-                  display:'grid',gridTemplateColumns:'1fr 1fr'}}>
+                <div key={i} style={{position:'relative',padding:'1px 8px',display:'grid',gridTemplateColumns:'1fr 1fr'}}>
                   <div style={{position:'absolute',right:0,top:0,bottom:0,
-                    width:`${Math.min((b.qty/maxBid)*100,100)}%`,
-                    background:'rgba(20,184,166,0.15)'}}/>
-                  <span style={{color:'var(--green)',fontFamily:'monospace',fontSize:10,position:'relative'}}>
-                    {fmtPrice(b.price)}
-                  </span>
-                  <span style={{textAlign:'right',color:'var(--text-2)',fontFamily:'monospace',
-                    fontSize:10,position:'relative'}}>
-                    {b.qty.toFixed(3)}
-                  </span>
+                    width:`${Math.min((b.qty/maxBid)*100,100)}%`,background:'rgba(20,184,166,0.15)'}}/>
+                  <span style={{color:'var(--green)',fontFamily:'monospace',fontSize:10,position:'relative'}}>{fmtPrice(b.price)}</span>
+                  <span style={{textAlign:'right',color:'var(--text-2)',fontFamily:'monospace',fontSize:10,position:'relative'}}>{b.qty.toFixed(3)}</span>
                 </div>
               ))}
             </div>
           </div>
           <div style={{padding:'4px 8px',borderTop:'1px solid var(--border)',
             fontSize:9,color:'var(--text-3)',flexShrink:0,lineHeight:1.6}}>
-            <span style={{color:'var(--red)'}}>▲ Asks</span> = sell orders waiting<br/>
-            <span style={{color:'var(--green)'}}>▼ Bids</span> = buy orders waiting<br/>
-            Thick bar = large order = support/resistance
+            <span style={{color:'var(--red)'}}>▲ Asks</span> = sell orders<br/>
+            <span style={{color:'var(--green)'}}>▼ Bids</span> = buy orders<br/>
+            Bar width = order size
           </div>
         </div>
       )}
