@@ -68,7 +68,7 @@ export default function TickerStrip({ pairs=[], watchlist=[], prices={}, onSelec
 
               {/* Price */}
               <span style={{fontSize:11,fontFamily:'monospace',color:'var(--text)',whiteSpace:'nowrap'}}>
-                {fmtPrice(p.price)}
+                ${fmtPrice(p.price)}
               </span>
 
               {/* Change % */}
