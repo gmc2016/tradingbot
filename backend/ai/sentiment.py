@@ -95,13 +95,22 @@ def llm_analyze_news(headlines, pair):
                     f'"reasoning":"one sentence","already_priced_in":<true|false>}}\n\nHeadlines:\n{heads}'}]},
             timeout=15)
         text   = r.json().get('content',[{}])[0].get('text','')
-        text   = re.sub(r'```json|```','',text).strip()
-        s      = text.find('{'); e = text.rfind('}')
-        if s != -1 and e != -1: text = text[s:e+1]
+        text = re.sub(r'```json|```', '', text).strip()
+        # Depth-based extraction to get first complete JSON object only
+        depth = 0; start = -1; end = -1
+        for i, ch in enumerate(text):
+            if ch == '{':
+                if depth == 0: start = i
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0: end = i; break
+        if start != -1 and end != -1:
+            text = text[start:end+1]
         result = json.loads(text)
-        score  = float(result.get('score',0))
-        label  = result.get('label','neutral')
-        reason = result.get('reasoning','')
+        score  = float(result.get('score', 0))
+        label  = result.get('label', 'neutral')
+        reason = result.get('reasoning', '')
         if result.get('already_priced_in'): score *= 0.3
         from db.activitylog import log as alog
         alog('ai', f'Sentiment {pair}: {label} ({score:+.2f}) — {reason}',
@@ -194,9 +203,17 @@ def llm_trade_decision(pair, signal, confidence, indicators, sentiment_score, re
                     f'"adjusted_confidence":<0-100>,"risk_level":"low|medium|high"}}'}]},
             timeout=15)
         text   = r.json().get('content',[{}])[0].get('text','')
-        text   = re.sub(r'```json|```','',text).strip()
-        s      = text.find('{'); e = text.rfind('}')
-        if s != -1 and e != -1: text = text[s:e+1]
+        text = re.sub(r'```json|```', '', text).strip()
+        depth = 0; start = -1; end = -1
+        for i, ch in enumerate(text):
+            if ch == '{':
+                if depth == 0: start = i
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0: end = i; break
+        if start != -1 and end != -1:
+            text = text[start:end+1]
         result   = json.loads(text)
         approved = result.get('approved', True)
         reason   = result.get('reasoning','')
