@@ -11,11 +11,22 @@ logger = logging.getLogger(__name__)
 EXCLUDE = {
     'USDC/USDT','BUSD/USDT','TUSD/USDT','USDP/USDT','FDUSD/USDT',
     'WBTC/USDT','WETH/USDT','WBNB/USDT','STETH/USDT','LUNC/USDT',
-    # Micro-caps that cause false signals — illiquid, wide spreads
+    # Micro-caps — illiquid, wide spreads, false signals
     'SPK/USDT','GUN/USDT','CFG/USDT','PROM/USDT','UTK/USDT',
     'HIGH/USDT','SUPER/USDT','GIGGLE/USDT','AUDIO/USDT','ONT/USDT',
     'ALICE/USDT','PORTAL/USDT','MOVR/USDT','ENJ/USDT','ORDI/USDT',
 }
+
+# Quality coins by sector — scanner will prefer these
+QUALITY_SECTORS = {
+    'large_cap':   ['BTC/USDT','ETH/USDT','BNB/USDT','SOL/USDT','XRP/USDT'],
+    'defi':        ['AAVE/USDT','UNI/USDT','COMP/USDT','MKR/USDT','CRV/USDT'],
+    'layer2':      ['MATIC/USDT','ARB/USDT','OP/USDT'],
+    'infrastructure':['LINK/USDT','DOT/USDT','AVAX/USDT','ATOM/USDT'],
+    'ai_gaming':   ['NEAR/USDT','FET/USDT','RENDER/USDT'],
+    'exchange':    ['OKB/USDT'],
+}
+QUALITY_ALL = [p for pairs in QUALITY_SECTORS.values() for p in pairs]
 
 def get_anthropic_key():
     from db.database import get_setting
@@ -124,11 +135,14 @@ def llm_rank_pairs(candidates):
 Candidates (by volume):
 {chr(10).join(lines)}
 
-Pick pairs with:
-- Strong trend OR clear breakout potential (high range %)
-- High liquidity (volume)
-- Not extreme overbought/oversold
-- Avoid pairs with suspicious volume spikes or pump-and-dump patterns
+Pick 8 pairs that together give SECTOR DIVERSITY (don't pick 8 correlated coins):
+- Include at least 2 large caps (BTC/ETH)
+- Include 1-2 DeFi (AAVE, UNI etc)
+- Include 1-2 infrastructure (LINK, DOT, AVAX)
+- Include 1-2 newer sectors (Layer2, AI)
+- Strong trend OR clear breakout potential
+- High liquidity, avoid pump-and-dump patterns
+- Diversification beats correlation — different sectors give more signal opportunities
 
 Respond in JSON only:
 {{"pairs":[{{"symbol":"BTC/USDT","score":85,"reason":"one sentence"}}],"summary":"one sentence about market"}}"""
