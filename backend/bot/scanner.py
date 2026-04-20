@@ -11,6 +11,10 @@ logger = logging.getLogger(__name__)
 EXCLUDE = {
     'USDC/USDT','BUSD/USDT','TUSD/USDT','USDP/USDT','FDUSD/USDT',
     'WBTC/USDT','WETH/USDT','WBNB/USDT','STETH/USDT','LUNC/USDT',
+    # Micro-caps that cause false signals — illiquid, wide spreads
+    'SPK/USDT','GUN/USDT','CFG/USDT','PROM/USDT','UTK/USDT',
+    'HIGH/USDT','SUPER/USDT','GIGGLE/USDT','AUDIO/USDT','ONT/USDT',
+    'ALICE/USDT','PORTAL/USDT','MOVR/USDT','ENJ/USDT','ORDI/USDT',
 }
 
 def get_anthropic_key():
@@ -49,7 +53,7 @@ def fetch_all_usdt_tickers():
             high  = t.get('high', price) or price
             low   = t.get('low',  price) or price
             chg   = t.get('percentage', 0) or 0
-            if vol < 5_000_000: continue
+            if vol < 20_000_000: continue  # Min $20M daily volume for quality
             if price <= 0: continue
             # Intraday range % — proxy for volatility without needing OHLCV
             range_pct = ((high - low) / low * 100) if low > 0 else 0
