@@ -6,8 +6,17 @@ logger   = logging.getLogger(__name__)
 analyzer = SentimentIntensityAnalyzer()
 
 # LLM sentiment cache — max 1 call per hour per pair
+import threading
 _sentiment_cache = {}
+_sentiment_locks = {}  # per-pair locks to prevent race conditions
+_cache_lock      = threading.Lock()
 CACHE_MINUTES    = 60
+
+def _get_pair_lock(pair):
+    with _cache_lock:
+        if pair not in _sentiment_locks:
+            _sentiment_locks[pair] = threading.Lock()
+        return _sentiment_locks[pair]
 
 def get_key(name):
     try:
@@ -121,23 +130,36 @@ def get_pair_sentiment(pair):
     rel   = [n for n in news if any(k in (n['title'] or '').lower() for k in kw)]
     items = rel or news
 
-    # Check 1hr LLM cache
+    # Check 1hr LLM cache first (no lock needed for read)
     cached = _sentiment_cache.get(pair)
     if cached and (datetime.utcnow() - cached['ts']) < timedelta(minutes=CACHE_MINUTES):
         return cached['score']
 
     anthropic_key = get_anthropic_key()
     if anthropic_key and rel:
-        headlines = [n['title'] for n in rel[:10] if n['title']]
-        llm_score, llm_label, _ = llm_analyze_news(headlines, pair)
-        if llm_score is not None:
-            vader_scores = [n['sentiment_score'] for n in items
-                            if n['sentiment_score'] is not None]
-            vader_avg = sum(vader_scores)/len(vader_scores) if vader_scores else 0
-            blended   = llm_score * 0.7 + vader_avg * 0.3
-            score     = round((blended + 1) / 2 * 100, 1)
-            _sentiment_cache[pair] = {'score': score, 'ts': datetime.utcnow()}
-            return score
+        # Use per-pair lock to prevent two threads calling LLM simultaneously
+        pair_lock = _get_pair_lock(pair)
+        if not pair_lock.acquire(blocking=False):
+            # Another thread is already fetching — use cached or VADER
+            if cached: return cached['score']
+        else:
+            try:
+                # Re-check cache after acquiring lock (another thread may have populated it)
+                cached = _sentiment_cache.get(pair)
+                if cached and (datetime.utcnow() - cached['ts']) < timedelta(minutes=CACHE_MINUTES):
+                    return cached['score']
+                headlines = [n['title'] for n in rel[:10] if n['title']]
+                llm_score, llm_label, _ = llm_analyze_news(headlines, pair)
+                if llm_score is not None:
+                    vader_scores = [n['sentiment_score'] for n in items
+                                    if n['sentiment_score'] is not None]
+                    vader_avg = sum(vader_scores)/len(vader_scores) if vader_scores else 0
+                    blended   = llm_score * 0.7 + vader_avg * 0.3
+                    score     = round((blended + 1) / 2 * 100, 1)
+                    _sentiment_cache[pair] = {'score': score, 'ts': datetime.utcnow()}
+                    return score
+            finally:
+                pair_lock.release()
 
     if cached: return cached['score']
     scores = [n['sentiment_score'] for n in items if n['sentiment_score'] is not None]
@@ -157,9 +179,17 @@ def llm_trade_decision(pair, signal, confidence, indicators, sentiment_score, re
                     f'Trading bot wants to {signal} {pair}.\n'
                     f'RSI:{indicators.get("rsi","?")} ADX:{indicators.get("adx","?")} '
                     f'Regime:{indicators.get("regime","?")} Confidence:{confidence}%\n'
-                    f'News sentiment:{sentiment_score}/100\n'
+                    f'News sentiment:{sentiment_score}/100 (50=neutral)\n'
                     f'Recent news:\n{heads or "None"}\n\n'
-                    f'Should bot proceed? Respond JSON only:\n'
+                    f'Evaluation rules:\n'
+                    f'- RSI below 28 is STRONGLY oversold — approve BUY unless there is coin-SPECIFIC bad news\n'
+                    f'- RSI above 72 is STRONGLY overbought — approve SELL unless coin-specific good news\n'
+                    f'- General crypto market fear does NOT block a coin-specific oversold signal\n'
+                    f'- A hack on Protocol X does not mean Protocol Y should not be bought\n'
+                    f'- Ranging regime is fine for mean-reversion — DO NOT block oversold signals in ranging markets\n'
+                    f'- Only block if: news is DIRECTLY negative for THIS specific coin, or signal confidence <55\n'
+                    f'- When in doubt, APPROVE — the technical signal exists for a reason\n\n'
+                    f'Respond JSON only:\n'
                     f'{{"approved":<true|false>,"reasoning":"one sentence",'
                     f'"adjusted_confidence":<0-100>,"risk_level":"low|medium|high"}}'}]},
             timeout=15)
