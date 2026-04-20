@@ -58,7 +58,7 @@ function Dashboard({ auth, logout }) {
   }))
 
   const actionBtns = [
-    ['⚡ Run now',       runNow],
+    ['⚡ Force scan',    runNow],
     ['📰 Refresh news',  refreshNews],
     ['🖐 Trade',         () => setShowTrade(true)],
     ['📋 History',       () => setShowHistory(true)],
