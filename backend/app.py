@@ -169,8 +169,8 @@ def subscribe_kline(symbol, timeframe='1h'):
             logger.debug(f'Kline WS {symbol}: {e}')
             _kline_state['running'] = False
 
-    t = threading.Thread(target=run, daemon=True, name=f'kline_{symbol}_{timeframe}')
-    t.start()
+    # Use eventlet.spawn so the green thread works with monkey-patched eventlet
+    eventlet.spawn(run)
     logger.info(f'Kline stream: {symbol} {timeframe}')
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
@@ -203,6 +203,8 @@ def scanner_cycle():
 def brain_cycle():
     try:
         if _gs('ai_brain_enabled')!='true': return
+        if _gs('bot_running')!='true': return   # Don't run brain when bot is stopped
+        if _gs('ai_brain_paused')=='true': return
         result=run_brain_cycle()
         if result:
             changed=apply_brain_recommendations(result)
@@ -260,11 +262,22 @@ def dashboard():
 
 @app.route('/api/bot/start',methods=['POST'])
 @login_required
-def start(): set_setting('bot_running','true'); push(); return jsonify({'ok':True})
+def start():
+    set_setting('bot_running','true')
+    set_setting('ai_brain_paused','false')
+    push()
+    return jsonify({'ok':True})
 
 @app.route('/api/bot/stop',methods=['POST'])
 @login_required
-def stop(): set_setting('bot_running','false'); push(); return jsonify({'ok':True})
+def stop():
+    set_setting('bot_running','false')
+    # Pause AI brain when bot is stopped
+    set_setting('ai_brain_paused','true')
+    push()
+    alog('system','Bot stopped — AI brain paused, sentiment cache still active')
+    return jsonify({'ok':True})
+
 
 @app.route('/api/bot/mode',methods=['POST'])
 @login_required
