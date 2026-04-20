@@ -265,10 +265,18 @@ def refresh_pair_cache():
             pair_data.append({'symbol':pair,'price':0,'change':0,'signal':'HOLD',
                               'confidence':0,'reason':'Error','sentiment':50,
                               'indicators':{},'cooldown':False})
-    _cache['pairs']     =pair_data
-    _cache['sentiments']={p['symbol']:p['sentiment'] for p in pair_data}
+    _cache['pairs']     = pair_data
+    _cache['sentiments']= {p['symbol']:p['sentiment'] for p in pair_data}
     from datetime import datetime as dt
-    _cache['last_update']=dt.utcnow().isoformat()
+    _cache['last_update']= dt.utcnow().isoformat()
+
+    # Refresh watchlist cache using already-fetched pair data
+    try:
+        wl_data = get_watchlist_data(cached_pairs=pair_data)
+        _cache['watchlist'] = wl_data
+    except Exception as e:
+        logger.debug(f'Watchlist cache: {e}')
+
     logger.info('Cache refreshed')
 
 def start_cache_refresh():
@@ -293,11 +301,8 @@ def get_dashboard_data():
         for p in pairs_raw]
     bal=get_demo_balance() if mode=='demo' else get_balance().get('USDT',0)
     llm_today=get_llm_today_count()
-    # Get watchlist data using cached pairs to avoid extra calls
-    try:
-        watchlist_data = get_watchlist_data(cached_pairs=pair_data)
-    except:
-        watchlist_data = []
+    # Watchlist data from cache only — refreshed during scan cycle
+    watchlist_data = _cache.get('watchlist', [])
 
     return {
         'mode':mode, 'bot_running':_s('bot_running','false')=='true',
