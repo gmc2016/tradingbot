@@ -125,7 +125,7 @@ export default function WatchlistPanel({ onClose, prices={}, onSelectPair }) {
 
                   {/* Price */}
                   <div style={{width:80,flexShrink:0}}>
-                    <div style={{fontSize:12,fontFamily:'monospace',fontWeight:600}}>{fmtP(price)}</div>
+                    <div style={{fontSize:12,fontFamily:'monospace',fontWeight:600}}>${fmtP(price)} <span style={{fontSize:9,color:'var(--text-3)'}}>USDT</span></div>
                     <div style={{fontSize:10,color:isUp?'var(--green)':'var(--red)'}}>
                       {isUp?'▲':'▼'}{Math.abs(change).toFixed(2)}%
                     </div>
