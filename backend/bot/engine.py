@@ -9,6 +9,15 @@ from db.activitylog import log as alog
 from bot.watchlist import check_watchlist_promotions, get_watchlist_data
 
 logger       = logging.getLogger(__name__)
+
+# Backward-compat shim — old cached container versions may call get_macro_data()
+def get_macro_data(*a, **kw):
+    try:
+        from bot.macro import fetch_all_macro, get_macro_risk_level
+        m = fetch_all_macro()
+        m['signals'] = get_macro_risk_level(m)
+        return m
+    except: return {'signals': {}}
 _demo        = {'balance':1000.0,'init':False}
 _cache       = {'pairs':[],'sentiments':{},'last_update':None}
 _loss_streak = {}
@@ -347,15 +356,8 @@ def get_dashboard_data():
     # Watchlist data from cache only — refreshed during scan cycle
     watchlist_data = _cache.get('watchlist', [])
 
-    # Get macro data for dashboard
-    try:
-        macro_data = get_macro_data()
-    except:
-        macro_data = None
-
     return {
         'mode':mode, 'bot_running':_s('bot_running','false')=='true',
-        'macro': macro_data,
         'watchlist': watchlist_data,
         'stats':get_stats(), 'open_trades':open_t, 'recent_trades':recent,
         'pairs':pair_data, 'news':get_news(15),
@@ -364,16 +366,6 @@ def get_dashboard_data():
         'last_update':_cache.get('last_update'),
         'llm_today':   llm_today,
         'llm_cost_today': round(llm_today*0.00068,4),
-        'macro': (lambda m: {
-            'fear_greed': m.get('FEAR_GREED'),
-            'sp500':      m.get('SP500'),
-            'nasdaq':     m.get('NASDAQ'),
-            'gold':       m.get('GOLD'),
-            'oil':        m.get('OIL_WTI'),
-            'dxy':        m.get('DXY'),
-            'vix':        m.get('VIX'),
-            'signals':    m.get('signals',{}),
-        })(get_macro_data()),
         'config':{
             'max_positions':         cfg['max_positions'],
             'stop_loss_pct':         _s('stop_loss_pct','1.5'),
