@@ -29,7 +29,7 @@ def get_watchlist_data(cached_pairs=None):
     from bot.exchange import fetch_ticker, fetch_ohlcv
     from bot.strategy import generate_signal
     from ai.sentiment import get_pair_sentiment
-    from db.database import get_setting, _s if hasattr(__import__('db.database', fromlist=['_s']), '_s') else None
+    from db.database import get_setting
 
     watchlist = get_watchlist()
     active    = [p.strip() for p in (get_setting('active_pairs') or '').split(',')]
