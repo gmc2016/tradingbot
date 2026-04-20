@@ -17,6 +17,7 @@ import BrainPanel    from './components/BrainPanel'
 import ActivityLog   from './components/ActivityLog'
 import TickerStrip   from './components/TickerStrip'
 import WatchlistPanel from './components/WatchlistPanel'
+import MacroPanel    from './components/MacroPanel'
 
 function Dashboard({ auth, logout }) {
   const { data, connected, prices, startBot, stopBot, setMode, runNow, refreshNews, updateSettings } = useDashboard()
@@ -30,6 +31,7 @@ function Dashboard({ auth, logout }) {
   const [showBrain,     setShowBrain]     = useState(false)
   const [showActivity,   setShowActivity]  = useState(false)
   const [showWatchlist,  setShowWatchlist] = useState(false)
+  const [showMacro,      setShowMacro]     = useState(false)
 
   const handleModeChange = (mode) => {
     if (mode === 'live') {
@@ -69,6 +71,7 @@ function Dashboard({ auth, logout }) {
     ['🧠 AI Brain',      () => setShowBrain(true)],
     ['📡 Activity',      () => setShowActivity(true)],
     ['👁 Watchlist',     () => setShowWatchlist(true)],
+    ['🌍 Macro',         () => setShowMacro(true)],
   ]
 
   return (
@@ -120,6 +123,7 @@ function Dashboard({ auth, logout }) {
       {showBrain&&<BrainPanel config={config} onClose={()=>setShowBrain(false)}/>}
       {showActivity&&<ActivityLog onClose={()=>setShowActivity(false)}/>}
       {showWatchlist&&<WatchlistPanel onClose={()=>setShowWatchlist(false)} prices={prices} onSelectPair={setSelectedPair}/>}
+      {showMacro&&<MacroPanel onClose={()=>setShowMacro(false)}/>}
       {showTrade&&(
         <ManualTrade
           pairs={pairs}
