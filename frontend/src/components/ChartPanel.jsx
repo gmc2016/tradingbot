@@ -99,16 +99,19 @@ export default function ChartPanel({ symbol='BTC/USDT', trades=[] }) {
     socketRef.current=socket
     socket.on('kline_update',({pair,tf:stf,candle})=>{
       if (pair!==symbol||!candleRef.current) return
-      candleRef.current.update({
-        time:candle.time,open:candle.open,
-        high:candle.high,low:candle.low,close:candle.close,
-      })
-      if (volRef.current) volRef.current.update({
-        time:candle.time,value:candle.volume,
-        color:candle.close>=candle.open?'rgba(20,184,166,0.3)':'rgba(239,68,68,0.3)',
-      })
-      setLastPrice(candle.close)
-      setLiveTag(true)
+      try {
+        const t = Math.floor(Number(candle.time))  // ensure integer seconds
+        candleRef.current.update({
+          time:t,open:candle.open,high:candle.high,
+          low:candle.low,close:candle.close,
+        })
+        if (volRef.current) volRef.current.update({
+          time:t,value:candle.volume||0,
+          color:candle.close>=candle.open?'rgba(20,184,166,0.3)':'rgba(239,68,68,0.3)',
+        })
+        setLastPrice(candle.close)
+        setLiveTag(true)
+      } catch(e){ console.debug('kline update:',e) }
     })
 
     // Also update price from the existing price_update events
@@ -141,15 +144,13 @@ export default function ChartPanel({ symbol='BTC/USDT', trades=[] }) {
     socketRef.current.off('kline_update')
     socketRef.current.on('kline_update',({pair,candle})=>{
       if (pair!==symbol||!candleRef.current) return
-      candleRef.current.update({
-        time:candle.time,open:candle.open,
-        high:candle.high,low:candle.low,close:candle.close,
-      })
-      if (volRef.current) volRef.current.update({
-        time:candle.time,value:candle.volume,
-        color:candle.close>=candle.open?'rgba(20,184,166,0.3)':'rgba(239,68,68,0.3)',
-      })
-      setLastPrice(candle.close); setLiveTag(true)
+      try {
+        const t=Math.floor(Number(candle.time))
+        candleRef.current.update({time:t,open:candle.open,high:candle.high,low:candle.low,close:candle.close})
+        if (volRef.current) volRef.current.update({time:t,value:candle.volume||0,
+          color:candle.close>=candle.open?'rgba(20,184,166,0.3)':'rgba(239,68,68,0.3)'})
+        setLastPrice(candle.close); setLiveTag(true)
+      } catch(e){ console.debug('kline:',e) }
     })
   },[symbol])
 
