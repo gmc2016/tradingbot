@@ -63,11 +63,17 @@ def run_brain_cycle():
                'partial_close_at_pct','trailing_stop_pct',
                'use_llm_filter','mtf_enabled','max_positions']}
 
+    # Get watchlist context for broader market view
+    try:
+        from bot.watchlist import get_watchlist_market_context
+        watchlist_ctx = get_watchlist_market_context()
+    except: watchlist_ctx = ""
+
     prompt = f"""You are an adaptive crypto day-trading bot manager. Analyze and recommend config changes.
 
 CURRENT CONFIG: {json.dumps(config)}
 PERFORMANCE (24h): {get_performance_summary()}
-MARKET: {get_market_summary()}
+MARKET (active pairs): {get_market_summary()}{watchlist_ctx}
 
 Rules for day trading (building balance slowly with daily wins):
 - If <10 closed trades total → ALWAYS return NO_CHANGE (not enough data)
