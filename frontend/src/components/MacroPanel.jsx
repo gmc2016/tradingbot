@@ -1,220 +1,227 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 
-const BIAS_STYLE = {
-  bullish:          { color:'var(--green)',  bg:'var(--green-bg)',  label:'🟢 Bullish' },
-  slightly_bullish: { color:'var(--green)',  bg:'var(--green-bg)',  label:'🟡 Slight Bull' },
-  neutral:          { color:'var(--text-2)', bg:'var(--bg-hover)',  label:'⚪ Neutral' },
-  caution:          { color:'var(--amber)',  bg:'var(--amber-bg)',  label:'🟠 Caution' },
-  bearish:          { color:'var(--red)',    bg:'var(--red-bg)',    label:'🔴 Bearish' },
+const RISK_COLORS = {
+  low:     { color:'var(--green)',  bg:'var(--green-bg)',  label:'✓ Low Risk' },
+  medium:  { color:'var(--blue)',   bg:'var(--blue-bg)',   label:'~ Medium Risk' },
+  high:    { color:'var(--amber)',  bg:'var(--amber-bg)',  label:'⚠ High Risk' },
+  extreme: { color:'var(--red)',    bg:'var(--red-bg)',    label:'✗ Extreme Risk' },
 }
 
-const FG_COLOR = v =>
-  v <= 25 ? 'var(--red)' : v <= 45 ? 'var(--amber)' :
-  v <= 55 ? 'var(--text-2)' : v <= 75 ? 'var(--green)' : '#f59e0b'
+const BIAS_COLORS = {
+  bullish:  'var(--green)',
+  neutral:  'var(--text-2)',
+  cautious: 'var(--amber)',
+  bearish:  'var(--red)',
+}
 
-export default function MacroPanel({ onClose }) {
+function MiniBar({ value, max, color }) {
+  const pct = Math.min(Math.abs(value / max) * 100, 100)
+  return (
+    <div style={{flex:1,height:4,background:'var(--bg-hover)',borderRadius:2,overflow:'hidden'}}>
+      <div style={{width:`${pct}%`,height:'100%',background:color,borderRadius:2,
+        transition:'width .3s'}}/>
+    </div>
+  )
+}
+
+function MacroRow({ label, price, change, unit='', hint }) {
+  if (!price && price !== 0) return null
+  const isUp = change >= 0
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',
+      borderBottom:'1px solid var(--border-dim)'}}>
+      <div style={{width:70,fontSize:11,color:'var(--text-3)',flexShrink:0}}>{label}</div>
+      <div style={{width:80,fontSize:11,fontFamily:'monospace',fontWeight:600,
+        color:'var(--text)',flexShrink:0}}>
+        {unit}{typeof price==='number'?price.toLocaleString('en-US',{maximumFractionDigits:2}):price}
+      </div>
+      <MiniBar value={Math.abs(change)} max={5} color={isUp?'var(--green)':'var(--red)'}/>
+      <div style={{width:55,fontSize:10,fontWeight:600,textAlign:'right',flexShrink:0,
+        color:isUp?'var(--green)':'var(--red)'}}>
+        {isUp?'+':''}{change?.toFixed(2)}%
+      </div>
+    </div>
+  )
+}
+
+export default function MacroPanel() {
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState('')
+  const [expanded,setExpanded]= useState(false)
 
-  const load = async (refresh=false) => {
-    setLoading(true); setError('')
+  const load = async () => {
     try {
-      const r = await axios.get(`/api/macro${refresh?'?refresh=1':''}`, { withCredentials:true })
+      const r = await axios.get('/api/macro', { withCredentials: true })
       setData(r.data)
-    } catch(e) { setError(e.response?.data?.error || 'Failed to load macro data') }
+    } catch(e) {}
     setLoading(false)
   }
 
-  useEffect(()=>{ load() },[])
+  useEffect(() => {
+    load()
+    const interval = setInterval(load, 15 * 60 * 1000) // refresh every 15 min
+    return () => clearInterval(interval)
+  }, [])
 
-  const fmt = (v, dec=2) => v!=null ? Number(v).toFixed(dec) : '—'
-  const fmtChg = v => v!=null ? `${v>=0?'+':''}${Number(v).toFixed(2)}%` : '—'
-  const fmtPrice = (v, dec=2) => v!=null ? Number(v).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec}) : '—'
+  if (loading && !data) return (
+    <div style={{padding:'6px 12px',fontSize:11,color:'var(--text-3)'}}>
+      Loading macro indicators...
+    </div>
+  )
+  if (!data) return null
 
-  const signals = data?.signals || {}
-  const bias    = BIAS_STYLE[signals.overall_bias] || BIAS_STYLE.neutral
-  const fg      = data?.FEAR_GREED
-  const dom     = data?.BTC_DOMINANCE
+  const { macro={}, risk={} } = data
+  const rc = RISK_COLORS[risk.level] || RISK_COLORS.medium
+  const fg = macro.FEAR_GREED || {}
+
+  // Fear & Greed color
+  const fgColor = fg.value <= 25 ? 'var(--red)' :
+                  fg.value <= 45 ? 'var(--amber)' :
+                  fg.value <= 65 ? 'var(--text-2)' :
+                  fg.value <= 80 ? 'var(--blue)' : 'var(--green)'
 
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.78)',display:'flex',
-      alignItems:'center',justifyContent:'center',zIndex:1000}}
-      onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:'var(--bg-card)',border:'1px solid var(--border)',
-        borderRadius:'var(--radius-lg)',width:640,maxWidth:'96vw',maxHeight:'92vh',
-        display:'flex',flexDirection:'column'}}>
+    <div style={{background:'var(--bg-surface)',borderTop:'1px solid var(--border)',flexShrink:0}}>
+      {/* Collapsed header — always visible */}
+      <div onClick={()=>setExpanded(v=>!v)}
+        style={{display:'flex',alignItems:'center',gap:10,padding:'5px 12px',
+          cursor:'pointer',userSelect:'none'}}
+        onMouseEnter={e=>e.currentTarget.style.background='var(--bg-hover)'}
+        onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
 
-        {/* Header */}
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
-          padding:'14px 18px',borderBottom:'1px solid var(--border)',flexShrink:0}}>
-          <div>
-            <div style={{fontWeight:600,fontSize:15}}>🌍 Macro Market Indicators</div>
-            <div style={{fontSize:11,color:'var(--text-3)',marginTop:2}}>
-              Global markets · Refreshes every 15 min · Influences trade decisions
+        <span style={{fontSize:10,fontWeight:600,color:'var(--text-3)',
+          textTransform:'uppercase',letterSpacing:.5,flexShrink:0}}>
+          Macro
+        </span>
+
+        {/* Risk badge */}
+        <span style={{fontSize:10,fontWeight:700,padding:'1px 7px',borderRadius:10,
+          background:rc.bg,color:rc.color,flexShrink:0}}>
+          {rc.label}
+        </span>
+
+        {/* Mini ticker strip */}
+        <div style={{display:'flex',gap:10,flex:1,overflow:'hidden'}}>
+          {[
+            ['S&P',   macro.SP500,   '$'],
+            ['NQ',    macro.NASDAQ,  '$'],
+            ['DJI',   macro.DOW,     '$'],
+            ['GOLD',  macro.GOLD,    '$'],
+            ['OIL',   macro.OIL,     '$'],
+            ['VIX',   macro.VIX,     ''],
+          ].map(([label,m,prefix])=>{
+            if (!m) return null
+            const isUp = (m.change_pct||0) >= 0
+            return (
+              <div key={label} style={{display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+                <span style={{fontSize:10,color:'var(--text-3)'}}>{label}</span>
+                <span style={{fontSize:10,fontWeight:600,color:isUp?'var(--green)':'var(--red)'}}>
+                  {isUp?'▲':'▼'}{Math.abs(m.change_pct||0).toFixed(1)}%
+                </span>
+              </div>
+            )
+          })}
+          {fg.value !== undefined && (
+            <div style={{display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+              <span style={{fontSize:10,color:'var(--text-3)'}}>F&G</span>
+              <span style={{fontSize:10,fontWeight:700,color:fgColor}}>{fg.value}</span>
             </div>
-          </div>
-          <div style={{display:'flex',gap:8,alignItems:'center'}}>
-            <button onClick={()=>load(true)} style={{padding:'4px 12px',border:'1px solid var(--border)',
-              borderRadius:6,fontSize:11,color:'var(--text-2)',cursor:'pointer'}}>
-              ↻ Refresh
-            </button>
-            <button onClick={onClose} style={{fontSize:20,color:'var(--text-2)'}}>×</button>
-          </div>
+          )}
         </div>
 
-        <div style={{flex:1,overflowY:'auto',padding:16}}>
-          {loading&&<div style={{textAlign:'center',padding:40,color:'var(--text-3)'}}>Loading macro data...</div>}
-          {error&&<div style={{background:'var(--red-bg)',borderRadius:6,padding:'8px 12px',color:'var(--red)',fontSize:12,marginBottom:12}}>{error}</div>}
+        {/* Bias */}
+        {risk.bias && (
+          <span style={{fontSize:10,fontWeight:600,
+            color:BIAS_COLORS[risk.bias]||'var(--text-2)',flexShrink:0}}>
+            {risk.bias.toUpperCase()}
+          </span>
+        )}
 
-          {data&&<>
-            {/* Overall bias + Fear & Greed */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:16}}>
-              <div style={{background:bias.bg,border:`1px solid ${bias.color}33`,
-                borderRadius:8,padding:'12px 14px',textAlign:'center'}}>
-                <div style={{fontSize:11,color:'var(--text-3)',marginBottom:4}}>Macro Bias</div>
-                <div style={{fontSize:18,fontWeight:700,color:bias.color}}>{bias.label}</div>
-                <div style={{fontSize:10,color:'var(--text-3)',marginTop:3}}>
-                  Position size: {signals.position_mult||1}×
-                </div>
-              </div>
+        <span style={{fontSize:10,color:'var(--text-3)',flexShrink:0}}>
+          {expanded?'▲':'▼'}
+        </span>
+      </div>
 
-              {fg&&(
-                <div style={{background:'var(--bg-surface)',border:'1px solid var(--border)',
-                  borderRadius:8,padding:'12px 14px',textAlign:'center'}}>
-                  <div style={{fontSize:11,color:'var(--text-3)',marginBottom:4}}>Fear & Greed</div>
-                  <div style={{fontSize:22,fontWeight:700,color:FG_COLOR(fg.value)}}>{fg.value}</div>
-                  <div style={{fontSize:11,color:FG_COLOR(fg.value),fontWeight:500}}>{fg.label}</div>
-                  {/* Progress bar */}
-                  <div style={{height:4,background:'var(--bg-hover)',borderRadius:2,marginTop:6,overflow:'hidden'}}>
-                    <div style={{width:`${fg.value}%`,height:'100%',borderRadius:2,
-                      background:`linear-gradient(90deg, #ef4444, #f59e0b, #22c55e, #f59e0b, #ef4444)`,
-                      backgroundSize:'500px 4px',backgroundPosition:`${fg.value*5}px 0`}}/>
+      {/* Expanded detail */}
+      {expanded && (
+        <div style={{padding:'8px 12px 12px',borderTop:'1px solid var(--border)'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 24px'}}>
+
+            {/* Left column — indices */}
+            <div>
+              <div style={{fontSize:10,color:'var(--text-3)',textTransform:'uppercase',
+                letterSpacing:.5,marginBottom:4,fontWeight:600}}>Stock Indices</div>
+              <MacroRow label="S&P 500"  price={macro.SP500?.price}  change={macro.SP500?.change_pct}  unit="$"/>
+              <MacroRow label="Nasdaq"   price={macro.NASDAQ?.price} change={macro.NASDAQ?.change_pct} unit="$"/>
+              <MacroRow label="Dow Jones"price={macro.DOW?.price}    change={macro.DOW?.change_pct}    unit="$"/>
+              <MacroRow label="VIX Fear" price={macro.VIX?.price}    change={macro.VIX?.change_pct}/>
+              <div style={{marginTop:8,fontSize:10,color:'var(--text-3)',textTransform:'uppercase',
+                letterSpacing:.5,marginBottom:4,fontWeight:600}}>Commodities</div>
+              <MacroRow label="Gold"   price={macro.GOLD?.price}   change={macro.GOLD?.change_pct}   unit="$"/>
+              <MacroRow label="Silver" price={macro.SILVER?.price} change={macro.SILVER?.change_pct} unit="$"/>
+              <MacroRow label="Oil WTI"price={macro.OIL?.price}    change={macro.OIL?.change_pct}    unit="$"/>
+            </div>
+
+            {/* Right column — risk + sentiment */}
+            <div>
+              <div style={{fontSize:10,color:'var(--text-3)',textTransform:'uppercase',
+                letterSpacing:.5,marginBottom:4,fontWeight:600}}>Currency & Sentiment</div>
+              <MacroRow label="USD Index" price={macro.DXY?.price} change={macro.DXY?.change_pct}/>
+
+              {/* Fear & Greed gauge */}
+              {fg.value !== undefined && (
+                <div style={{marginTop:8,padding:'8px 10px',background:'var(--bg-card)',
+                  borderRadius:6,border:'1px solid var(--border)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+                    <span style={{fontSize:11,fontWeight:600}}>Crypto Fear & Greed</span>
+                    <span style={{fontSize:13,fontWeight:700,color:fgColor}}>{fg.value}</span>
+                  </div>
+                  <div style={{height:8,background:'var(--bg-hover)',borderRadius:4,overflow:'hidden',marginBottom:4}}>
+                    <div style={{width:`${fg.value}%`,height:'100%',borderRadius:4,
+                      background:`linear-gradient(to right, var(--red), var(--amber), var(--green))`}}/>
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'var(--text-3)'}}>
+                    <span>Extreme Fear</span>
+                    <span style={{fontWeight:600,color:fgColor}}>{fg.label}</span>
+                    <span>Extreme Greed</span>
                   </div>
                 </div>
               )}
 
-              {dom&&(
-                <div style={{background:'var(--bg-surface)',border:'1px solid var(--border)',
-                  borderRadius:8,padding:'12px 14px',textAlign:'center'}}>
-                  <div style={{fontSize:11,color:'var(--text-3)',marginBottom:4}}>BTC Dominance</div>
-                  <div style={{fontSize:22,fontWeight:700,color:'var(--amber)'}}>{dom.btc_dominance}%</div>
-                  <div style={{fontSize:11,color:'var(--text-3)'}}>ETH: {dom.eth_dominance}%</div>
-                  {signals.alt_season&&(
-                    <div style={{fontSize:10,color:'var(--teal)',marginTop:2}}>🌊 Alt season signal</div>
-                  )}
+              {/* Risk factors */}
+              {risk.reasons?.length > 0 && (
+                <div style={{marginTop:8}}>
+                  <div style={{fontSize:10,color:'var(--text-3)',textTransform:'uppercase',
+                    letterSpacing:.5,marginBottom:4,fontWeight:600}}>Active Risk Factors</div>
+                  {risk.reasons.map((r,i)=>(
+                    <div key={i} style={{fontSize:10,color:'var(--amber)',marginBottom:3,
+                      padding:'3px 6px',background:'var(--amber-bg)',borderRadius:3,lineHeight:1.4}}>
+                      ⚠ {r}
+                    </div>
+                  ))}
                 </div>
               )}
+
+              {/* Impact on trading */}
+              <div style={{marginTop:8,padding:'6px 8px',background:'var(--bg-card)',
+                borderRadius:4,border:'1px solid var(--border)',fontSize:10,
+                color:'var(--text-2)',lineHeight:1.6}}>
+                <b style={{color:'var(--text)'}}>Trading impact:</b><br/>
+                {risk.level==='extreme' && '🚫 All new trades blocked — extreme macro risk'}
+                {risk.level==='high'    && '⚠ Reduced position size — high macro risk'}
+                {risk.level==='medium'  && '~ Normal trading with caution'}
+                {risk.level==='low'     && '✓ Favorable conditions for trading'}
+              </div>
             </div>
+          </div>
 
-            {/* Macro suppression warning */}
-            {signals.suppress_buy&&(
-              <div style={{background:'var(--red-bg)',border:'1px solid var(--red-dim)',
-                borderRadius:6,padding:'8px 12px',fontSize:12,color:'var(--red)',
-                marginBottom:12,fontWeight:600}}>
-                ⚠ BUY signals currently SUPPRESSED by macro conditions
-              </div>
-            )}
-
-            {/* Macro reasons */}
-            {signals.reasons?.length>0&&(
-              <div style={{background:'var(--bg-surface)',borderRadius:6,padding:'10px 12px',
-                marginBottom:14,fontSize:12,color:'var(--text-2)',lineHeight:1.7}}>
-                {signals.reasons.map((r,i)=>(
-                  <div key={i}>→ {r}</div>
-                ))}
-              </div>
-            )}
-
-            {/* US Markets */}
-            <Section title="🇺🇸 US Stock Markets">
-              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
-                <MarketCard label="S&P 500" d={data.SP500} bigNum/>
-                <MarketCard label="Nasdaq"  d={data.NASDAQ} bigNum/>
-                <MarketCard label="Dow Jones" d={data.DOW} bigNum/>
-              </div>
-            </Section>
-
-            {/* Fear indicators */}
-            <Section title="📊 Fear & Volatility">
-              <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:8}}>
-                <MarketCard label="VIX (Volatility Index)" d={data.VIX}
-                  note={data.VIX?.price>35?'🔴 Extreme fear':data.VIX?.price>25?'🟠 Elevated':'🟢 Normal'}/>
-                <MarketCard label="US Dollar Index (DXY)" d={data.DXY}
-                  note="↑ Strong dollar = crypto headwind"/>
-              </div>
-            </Section>
-
-            {/* Commodities */}
-            <Section title="🛢 Commodities">
-              <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:8}}>
-                <MarketCard label="Gold (XAU)" d={data.GOLD} prefix="$"/>
-                <MarketCard label="Silver (XAG)" d={data.SILVER} prefix="$"/>
-                <MarketCard label="Crude Oil WTI" d={data.OIL_WTI} prefix="$"
-                  note="↑ Inflation signal → Fed hawkish → risk-off"/>
-                <MarketCard label="Brent Crude" d={data.OIL_BRENT} prefix="$"/>
-              </div>
-            </Section>
-
-            {/* How it influences trading */}
-            <Section title="⚙ How This Influences Trading">
-              <div style={{fontSize:12,color:'var(--text-2)',lineHeight:1.8}}>
-                <div>• <b style={{color:'var(--text)'}}>Position size multiplier {signals.position_mult||1}×</b> — applied to every new trade</div>
-                <div>• S&P/Nasdaq down &gt;2% → BUY signals suppressed until macro stabilizes</div>
-                <div>• VIX &gt;35 → position size halved (extreme market fear)</div>
-                <div>• DXY up &gt;0.5% → headwind for crypto, reduces confidence boost</div>
-                <div>• Fear&amp;Greed &lt;20 → contrarian signal, slight BUY confidence boost</div>
-                <div>• AI Brain reads full macro context every 30 min to adapt strategy</div>
-              </div>
-            </Section>
-
-            {data.fetched_at&&(
-              <div style={{fontSize:10,color:'var(--text-3)',textAlign:'right'}}>
-                Last updated: {new Date(data.fetched_at+'Z').toLocaleTimeString()}
-              </div>
-            )}
-          </>}
+          <div style={{marginTop:6,fontSize:10,color:'var(--text-3)',textAlign:'right'}}>
+            Updated: {macro.fetched_at ? new Date(macro.fetched_at+'Z').toLocaleTimeString() : '—'}
+            {' · '}Refreshes every 15 min
+          </div>
         </div>
-      </div>
-    </div>
-  )
-}
-
-function Section({title,children}){
-  return (
-    <div style={{marginBottom:14}}>
-      <div style={{fontSize:11,fontWeight:600,color:'var(--text-3)',textTransform:'uppercase',
-        letterSpacing:.5,marginBottom:8}}>{title}</div>
-      {children}
-    </div>
-  )
-}
-
-function MarketCard({label,d,prefix='',bigNum=false,note}){
-  if (!d) return (
-    <div style={{background:'var(--bg-surface)',border:'1px solid var(--border)',
-      borderRadius:6,padding:'8px 12px',opacity:.5}}>
-      <div style={{fontSize:11,color:'var(--text-3)'}}>{label}</div>
-      <div style={{fontSize:12,color:'var(--text-3)'}}>—</div>
-    </div>
-  )
-  const isUp = d.change >= 0
-  return (
-    <div style={{background:'var(--bg-surface)',border:`1px solid ${isUp?'rgba(20,184,166,.2)':'rgba(239,68,68,.2)'}`,
-      borderRadius:6,padding:'8px 12px'}}>
-      <div style={{fontSize:10,color:'var(--text-3)',marginBottom:3}}>{label}</div>
-      <div style={{display:'flex',alignItems:'baseline',gap:6,flexWrap:'wrap'}}>
-        <span style={{fontSize:bigNum?14:13,fontWeight:700,fontFamily:'monospace'}}>
-          {prefix}{bigNum
-            ? Number(d.price).toLocaleString('en-US',{maximumFractionDigits:2})
-            : Number(d.price).toFixed(d.price>100?2:4)}
-        </span>
-        <span style={{fontSize:11,fontWeight:600,color:isUp?'var(--green)':'var(--red)'}}>
-          {isUp?'▲':'▼'}{Math.abs(d.change).toFixed(2)}%
-        </span>
-      </div>
-      {note&&<div style={{fontSize:9,color:'var(--text-3)',marginTop:2}}>{note}</div>}
+      )}
     </div>
   )
 }
