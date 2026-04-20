@@ -98,53 +98,80 @@ def start_price_stream():
         except Exception as e: logger.error(f'WS: {e}')
     _ws_thread=threading.Thread(target=run,daemon=True); _ws_thread.start()
 
-# Kline (candle) streams — proxied from Binance through backend to avoid browser CSP blocks
-_kline_ws     = {}   # symbol+tf -> websocket
-_kline_thread_map = {}
+# Kline stream — single active stream, switches when symbol/tf changes
+_kline_state = {'symbol': None, 'tf': None, 'ws': None, 'running': False}
+_kline_lock  = threading.Lock()
 
 def subscribe_kline(symbol, timeframe='1h'):
-    """Subscribe to a kline stream and push updates to frontend via SocketIO."""
-    key = f'{symbol}_{timeframe}'
-    # Close existing if switching
-    if key in _kline_ws:
-        try: _kline_ws[key].close()
-        except: pass
+    """
+    Single kline stream manager. Only one stream active at a time.
+    If same symbol+tf already running, do nothing.
+    """
+    with _kline_lock:
+        # Already subscribed to this exact stream — skip
+        if (_kline_state['symbol'] == symbol and
+                _kline_state['tf'] == timeframe and
+                _kline_state['running']):
+            return
+
+        # Close existing stream cleanly
+        if _kline_state['ws']:
+            try:
+                _kline_state['ws'].close()
+            except: pass
+            _kline_state['ws'] = None
+
+        _kline_state['symbol']  = symbol
+        _kline_state['tf']      = timeframe
+        _kline_state['running'] = True
+
     import websocket as ws_lib
     stream = symbol.replace('/','').lower()
     url    = f'wss://stream.binance.com:9443/ws/{stream}@kline_{timeframe}'
 
     def on_msg(ws, msg):
         try:
-            data = json.loads(msg)
-            k    = data.get('k',{})
+            k = json.loads(msg).get('k', {})
             if not k: return
-            pair = symbol
-            candle = {
-                'time':  int(k['t']) // 1000,
-                'open':  float(k['o']), 'high': float(k['h']),
-                'low':   float(k['l']), 'close':float(k['c']),
-                'volume':float(k['v']), 'closed': bool(k['x']),
-            }
-            socketio.emit('kline_update', {'pair': pair, 'tf': timeframe, 'candle': candle})
+            # Only emit if still the active stream
+            if _kline_state['symbol'] != symbol or _kline_state['tf'] != timeframe:
+                return
+            socketio.emit('kline_update', {
+                'pair': symbol, 'tf': timeframe,
+                'candle': {
+                    'time':   int(k['t']) // 1000,
+                    'open':   float(k['o']), 'high':  float(k['h']),
+                    'low':    float(k['l']), 'close': float(k['c']),
+                    'volume': float(k['v']), 'closed':bool(k['x']),
+                }
+            })
         except: pass
 
     def on_close(ws, *a):
-        eventlet.sleep(3)
-        subscribe_kline(symbol, timeframe)
+        # Only reconnect if still the active subscription
+        if _kline_state['symbol'] == symbol and _kline_state['tf'] == timeframe:
+            _kline_state['running'] = False
+            eventlet.sleep(5)
+            if _kline_state['symbol'] == symbol and _kline_state['tf'] == timeframe:
+                subscribe_kline(symbol, timeframe)
+
+    def on_error(ws, e):
+        logger.debug(f'Kline WS error {symbol}: {e}')
 
     def run():
         try:
             ws = ws_lib.WebSocketApp(url, on_message=on_msg,
-                on_error=lambda ws,e: None, on_close=on_close)
-            _kline_ws[key] = ws
-            ws.run_forever(ping_interval=20)
+                                     on_error=on_error, on_close=on_close)
+            with _kline_lock:
+                _kline_state['ws'] = ws
+            ws.run_forever(ping_interval=30)
         except Exception as e:
             logger.debug(f'Kline WS {symbol}: {e}')
+            _kline_state['running'] = False
 
-    t = threading.Thread(target=run, daemon=True)
-    _kline_thread_map[key] = t
+    t = threading.Thread(target=run, daemon=True, name=f'kline_{symbol}_{timeframe}')
     t.start()
-    logger.info(f'Kline stream started: {symbol} {timeframe}')
+    logger.info(f'Kline stream: {symbol} {timeframe}')
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 def push():
@@ -265,6 +292,7 @@ def get_settings():
           'scanner_enabled','scanner_interval_hours','scanner_auto_update',
           'scanner_top_n','pinned_pairs','ai_brain_enabled']
     data={k:_gs(k) for k in keys}
+    data['watchlist'] = get_setting('watchlist') or 'BTC/USDT,ETH/USDT'
     data['binance_api_key']   ='***' if get_setting('binance_api_key')    else ''
     data['binance_api_secret']='***' if get_setting('binance_api_secret') else ''
     data['newsapi_key']       ='***' if get_setting('newsapi_key')        else ''
@@ -340,6 +368,38 @@ def news(): return jsonify(get_news(20))
 @app.route('/api/news/refresh',methods=['POST'])
 @login_required
 def ref_news(): fetch_and_analyze(); push(); return jsonify({'ok':True})
+
+@app.route('/api/watchlist', methods=['GET'])
+@login_required
+def get_watchlist_route():
+    from bot.watchlist import get_watchlist
+    from bot.engine import _cache
+    try:
+        # Use cached watchlist data — refreshed every minute in background
+        wl_data  = _cache.get('watchlist', [])
+        wl_pairs = get_watchlist()
+        # If cache empty (first load), return minimal data quickly
+        if not wl_data:
+            wl_data = [{'symbol':p,'price':0,'change':0,'signal':'HOLD',
+                        'confidence':0,'reason':'Loading...','sentiment':50,
+                        'indicators':{},'in_active_pairs':False,'auto_promote':False}
+                       for p in wl_pairs]
+        return jsonify({'pairs': wl_data, 'watchlist': wl_pairs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/watchlist', methods=['POST'])
+@login_required
+def set_watchlist_route():
+    from bot.watchlist import set_watchlist
+    data  = request.json or {}
+    pairs = data.get('pairs', [])
+    if isinstance(pairs, str):
+        pairs = [p.strip() for p in pairs.split(',') if p.strip()]
+    set_watchlist(pairs)
+    from db.activitylog import log as alog
+    alog('settings', f'Watchlist updated: {", ".join(pairs[:5])}{"..." if len(pairs)>5 else ""}')
+    return jsonify({'ok': True, 'pairs': pairs})
 
 @app.route('/api/kline/subscribe', methods=['POST'])
 @login_required
