@@ -111,6 +111,7 @@ function Dashboard({ auth, logout }) {
           <KpiBar stats={stats} openTrades={open_trades} maxPositions={config.max_positions||5}/>
           <ChartPanel symbol={selectedPair} trades={recent_trades}/>
           <TradesTable trades={recent_trades} mode={mode}/>
+          <MacroPanel/>
         </div>
         <RightPanel openTrades={open_trades} pairs={pairs} news={news} config={config}/>
       </div>
@@ -123,7 +124,6 @@ function Dashboard({ auth, logout }) {
       {showBrain&&<BrainPanel config={config} onClose={()=>setShowBrain(false)}/>}
       {showActivity&&<ActivityLog onClose={()=>setShowActivity(false)}/>}
       {showWatchlist&&<WatchlistPanel onClose={()=>setShowWatchlist(false)} prices={prices} onSelectPair={setSelectedPair}/>}
-      {showMacro&&<MacroPanel onClose={()=>setShowMacro(false)}/>}
       {showTrade&&(
         <ManualTrade
           pairs={pairs}
