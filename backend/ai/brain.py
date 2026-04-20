@@ -71,8 +71,8 @@ def run_brain_cycle():
 
     # Get macro context
     try:
-        from ai.macro import get_macro_summary_for_ai
-        macro_ctx = get_macro_summary_for_ai()
+        from bot.macro import get_macro_summary_for_ai, fetch_all_macro
+        macro_ctx = '\n' + get_macro_summary_for_ai(fetch_all_macro())
     except: macro_ctx = ""
 
     prompt = f"""You are an adaptive crypto day-trading bot manager. Analyze and recommend config changes.
