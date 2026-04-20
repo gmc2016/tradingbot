@@ -187,8 +187,34 @@ def news_cycle():
     except Exception as e: logger.error(f'News: {e}')
 
 def cache_cycle():
-    try: refresh_pair_cache(); push()
+    try:
+        refresh_pair_cache()
+        push()
     except Exception as e: logger.error(f'Cache: {e}')
+
+def macro_cycle():
+    """Refresh macro data every 15 min and log notable changes."""
+    try:
+        from ai.macro import get_macro_data
+        from db.activitylog import log as alog
+        data  = get_macro_data(force_refresh=True)
+        sigs  = data.get('signals', {})
+        bias  = sigs.get('overall_bias', 'neutral')
+        fg    = data.get('FEAR_GREED', {})
+        sp    = data.get('SP500', {})
+        detail = {
+            'bias': bias,
+            'fear_greed': fg.get('value'),
+            'sp500_change': sp.get('change'),
+            'position_mult': sigs.get('position_mult', 1.0),
+            'suppress_buy': sigs.get('suppress_buy', False),
+        }
+        level = 'warning' if sigs.get('suppress_buy') or sigs.get('risk_level') == 'high' else 'info'
+        reasons = sigs.get('reasons', [])
+        msg = f'Macro update: {bias.upper()} | F&G:{fg.get("value","?")} SP500:{sp.get("change",0):+.1f}%'
+        if reasons: msg += f' — {reasons[0]}'
+        alog('system', msg, level=level, detail=detail)
+    except Exception as e: logger.debug(f'Macro cycle: {e}')
 
 def scanner_cycle():
     try:
@@ -215,6 +241,7 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(bot_cycle,    'interval',minutes=5,  id='bot',    max_instances=1,misfire_grace_time=60)
 scheduler.add_job(news_cycle,   'interval',minutes=15, id='news',   max_instances=1,misfire_grace_time=120)
 scheduler.add_job(cache_cycle,  'interval',minutes=1,  id='cache',  max_instances=1,misfire_grace_time=30)
+scheduler.add_job(macro_cycle,  'interval',minutes=15, id='macro',  max_instances=1,misfire_grace_time=60)
 scheduler.add_job(scanner_cycle,'interval',hours=6,    id='scanner',max_instances=1,misfire_grace_time=300)
 scheduler.add_job(brain_cycle,  'interval',minutes=30, id='brain',  max_instances=1,misfire_grace_time=120)
 scheduler.start()
@@ -483,6 +510,15 @@ def run_brain():
         logger.error(f'Brain: {e}'); return jsonify({'error':str(e)}),500
 
 # ── Account ────────────────────────────────────────────────────────────────────
+@app.route('/api/macro')
+@login_required
+def macro_data():
+    try:
+        from ai.macro import get_macro_data
+        return jsonify(get_macro_data(force_refresh=request.args.get('refresh')=='1'))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/account')
 @login_required
 def account():
