@@ -120,10 +120,10 @@ def subscribe_kline(symbol, timeframe='1h'):
             if not k: return
             pair = symbol
             candle = {
-                'time':  k['t'] // 1000,
+                'time':  int(k['t']) // 1000,
                 'open':  float(k['o']), 'high': float(k['h']),
                 'low':   float(k['l']), 'close':float(k['c']),
-                'volume':float(k['v']), 'closed': k['x'],
+                'volume':float(k['v']), 'closed': bool(k['x']),
             }
             socketio.emit('kline_update', {'pair': pair, 'tf': timeframe, 'candle': candle})
         except: pass
