@@ -69,11 +69,18 @@ def run_brain_cycle():
         watchlist_ctx = get_watchlist_market_context()
     except: watchlist_ctx = ""
 
+    # Get macro context
+    try:
+        from ai.macro import get_macro_summary_for_ai
+        macro_ctx = get_macro_summary_for_ai()
+    except: macro_ctx = ""
+
     prompt = f"""You are an adaptive crypto day-trading bot manager. Analyze and recommend config changes.
 
 CURRENT CONFIG: {json.dumps(config)}
 PERFORMANCE (24h): {get_performance_summary()}
 MARKET (active pairs): {get_market_summary()}{watchlist_ctx}
+{macro_ctx}
 
 Rules for day trading (building balance slowly with daily wins):
 - If <10 closed trades total → ALWAYS return NO_CHANGE (not enough data)
