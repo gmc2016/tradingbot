@@ -7,8 +7,6 @@ from db.database import (get_setting, set_setting, insert_trade, close_trade,
                           get_open_trades, get_recent_trades, get_stats, get_news)
 from db.activitylog import log as alog
 from bot.watchlist import check_watchlist_promotions, get_watchlist_data
-from ai.macro import get_macro_trade_modifier, get_macro_data, scan_news_for_macro
-from ai.macro import get_macro_data, get_macro_summary_for_ai
 
 logger       = logging.getLogger(__name__)
 _demo        = {'balance':1000.0,'init':False}
@@ -192,14 +190,15 @@ def scan_and_trade():
         if sig in ('BUY','SELL') and conf>=55:
             # Apply macro filters
             try:
-                macro  = get_macro_data()
-                msigs  = macro.get('signals', {})
-                # Suppress buys on bad macro days
-                if sig == 'BUY' and msigs.get('suppress_buy'):
-                    alog('signal', f'{pair}: BUY suppressed by macro — {msigs["reasons"][0] if msigs.get("reasons") else "macro headwind"}', level='warning')
+                from bot.macro import fetch_all_macro, get_macro_risk_level
+                macro      = fetch_all_macro()
+                risk       = get_macro_risk_level(macro)
+                macro_mult = 1.0
+                if risk['level'] == 'extreme':
+                    alog('signal', f'{pair}: {sig} blocked — macro risk EXTREME', level='warning')
                     continue
-                # Apply macro position size multiplier
-                macro_mult = msigs.get('position_mult', 1.0)
+                elif risk['level'] == 'high':
+                    macro_mult = 0.8  # reduce size on high risk
             except:
                 macro_mult = 1.0
 
