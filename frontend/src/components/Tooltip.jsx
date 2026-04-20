@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react'
 
 const SIGNAL_INFO = {
-  BUY:  'BUY signal — bot sees bullish conditions. Price likely moving up. Bot may open or already has a long position.',
-  SELL: 'SELL signal — bot sees bearish conditions. Price likely moving down. Bot may open or already has a short/sell position.',
-  HOLD: 'HOLD — no clear signal. Conditions not strong enough to trade. Bot is watching but not acting.',
+  BUY:  'BUY signal — indicators show bullish conditions (oversold RSI, MACD cross up, price below BB). The % is confidence level. Bot will open a long position on next 5-min scan if signal holds.',
+  SELL: 'SELL signal — indicators show bearish conditions (overbought RSI, MACD cross down, price above BB). The % is confidence. Note: in spot trading SELL means selling an existing position or shorting if allowed. Bot will act on next 5-min scan.',
+  HOLD: 'HOLD — signals are mixed or below confidence threshold (need score ≥4). Bot is monitoring but not trading. This pair is safe to ignore for now.',
 }
 
 const TERM_INFO = {
