@@ -36,7 +36,7 @@ export default function TradesTable({ trades = [], mode }) {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Time','Pair','Side','Entry','Exit','P&L','Status','Reason'].map(h => (
+              {['Time','Pair','Side','Entry','Exit','SL','TP','P&L','Status','Reason'].map(h => (
                 <th key={h} style={{
                   padding: '5px 10px', textAlign: 'left', fontSize: 10,
                   color: 'var(--text-3)', fontWeight: 500, whiteSpace: 'nowrap',
@@ -47,7 +47,7 @@ export default function TradesTable({ trades = [], mode }) {
           </thead>
           <tbody>
             {trades.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: '16px 10px', color: 'var(--text-3)', textAlign: 'center' }}>
+              <tr><td colSpan={10} style={{ padding: '16px 10px', color: 'var(--text-3)', textAlign: 'center' }}>
                 No trades yet — start the bot to begin
               </td></tr>
             ) : trades.map(t => {
@@ -67,6 +67,13 @@ export default function TradesTable({ trades = [], mode }) {
                   <td style={{ padding: '5px 10px', fontFamily: 'monospace' }}>{formatPrice(t.entry_price)}</td>
                   <td style={{ padding: '5px 10px', fontFamily: 'monospace', color: 'var(--text-2)' }}>
                     {t.exit_price ? formatPrice(t.exit_price) : '—'}
+                  </td>
+                  <td style={{ padding: '5px 10px', fontFamily: 'monospace', color: 'var(--red)', fontSize:11 }}>
+                    {formatPrice(t.stop_loss)}
+                  </td>
+                  <td style={{ padding: '5px 10px', fontFamily: 'monospace', color: 'var(--green)', fontSize:11 }}>
+                    {formatPrice(t.take_profit)}
+                    {t.trailing_stop ? <span style={{fontSize:8,color:'var(--teal)',marginLeft:2,fontFamily:'sans-serif'}}>↑TRAIL</span> : null}
                   </td>
                   <td style={{ padding: '5px 10px', fontWeight: 600,
                     color: pnl == null ? 'var(--text-2)' : pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
