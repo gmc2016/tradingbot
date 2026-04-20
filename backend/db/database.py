@@ -33,7 +33,7 @@ def init_db():
         ('active_pairs','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,MATIC/USDT,NEAR/USDT,UNI/USDT'),
         ('bot_running','false'), ('starting_balance','1000'),
         ('trailing_stop_enabled','true'), ('trailing_stop_pct','0.8'),
-        ('partial_close_enabled','true'), ('partial_close_at_pct','1.5'),
+        ('partial_close_enabled','true'), ('partial_close_at_pct','0.8'),
         ('partial_close_size_pct','50'), ('strategy_mode','combined'),
         ('max_loss_streak','3'), ('cooldown_minutes','60'),
         ('use_llm_filter','false'), ('mtf_enabled','false'),
@@ -56,7 +56,7 @@ def init_db():
         ('last_scan_at',''), ('last_scan_result',''),
         ('strategy_mode','combined'), ('max_loss_streak','3'),
         ('cooldown_minutes','60'), ('trailing_stop_enabled','true'),
-        ('partial_close_enabled','true'), ('max_positions','5'),
+        ('partial_close_enabled','true'), ('partial_close_at_pct','0.8'), ('max_positions','5'),
         ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
         ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
         ('anthropic_api_key', os.environ.get('ANTHROPIC_API_KEY','')),
@@ -64,6 +64,13 @@ def init_db():
         ('binance_api_secret',os.environ.get('BINANCE_API_SECRET','')),
         ('newsapi_key',       os.environ.get('NEWSAPI_KEY','')),
     ]
+    # Force update partial_close_at_pct if still at old default 1.5
+    try:
+        cur_pc = c.execute("SELECT value FROM settings WHERE key='partial_close_at_pct'").fetchone()
+        if cur_pc and cur_pc[0] == '1.5':
+            c.execute("UPDATE settings SET value='0.8' WHERE key='partial_close_at_pct'")
+    except: pass
+
     # Force reset pairs if they contain known micro-cap junk from scanner
     try:
         current_pairs = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
@@ -124,6 +131,11 @@ def partial_close_trade(tid, new_qty, partial_pnl):
 def update_trailing_stop(tid, new_sl):
     conn = get_conn()
     conn.execute('UPDATE trades SET stop_loss=?,trailing_stop=1 WHERE id=?', (new_sl, tid))
+    conn.commit(); conn.close()
+
+def update_trailing_tp(tid, new_tp):
+    conn = get_conn()
+    conn.execute('UPDATE trades SET take_profit=?,trailing_stop=1 WHERE id=?', (new_tp, tid))
     conn.commit(); conn.close()
 
 def get_open_trades():
