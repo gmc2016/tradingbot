@@ -10,7 +10,7 @@ import threading
 _sentiment_cache = {}
 _sentiment_locks = {}  # per-pair locks to prevent race conditions
 _cache_lock      = threading.Lock()
-CACHE_MINUTES    = 60
+CACHE_MINUTES    = 90  # 90 min cache — reduces to ~8 LLM calls per hour for 12 pairs
 
 def _get_pair_lock(pair):
     with _cache_lock:
@@ -183,6 +183,24 @@ def get_pair_sentiment(pair):
 def llm_trade_decision(pair, signal, confidence, indicators, sentiment_score, recent_news):
     key = get_anthropic_key()
     if not key: return True, 'No LLM key — proceeding on technical signal', confidence
+
+    # Get macro context — free, no extra API calls if cached
+    macro_summary = ''
+    macro_risk    = 'low'
+    try:
+        from bot.macro import get_macro_summary_for_ai, get_macro_risk_level, fetch_all_macro
+        macro      = fetch_all_macro()
+        macro_summary = get_macro_summary_for_ai(macro)
+        macro_risk    = get_macro_risk_level(macro)['level']
+        # Block trade entirely if macro risk is extreme
+        if macro_risk == 'extreme':
+            from db.activitylog import log as alog
+            alog('ai', f'Trade BLOCKED by macro risk (extreme) — {pair} {signal}',
+                 level='warning', detail={'pair':pair,'signal':signal,'macro_risk':macro_risk})
+            return False, 'Macro risk EXTREME — S&P/Nasdaq selloff or extreme fear, blocking all new trades', 0
+    except Exception as e:
+        logger.debug(f'Macro fetch: {e}')
+
     try:
         increment_llm_counter()
         heads = '\n'.join(f'- {n["title"]}' for n in (recent_news or [])[:8] if n.get('title'))
@@ -194,8 +212,9 @@ def llm_trade_decision(pair, signal, confidence, indicators, sentiment_score, re
                     f'Trading bot wants to {signal} {pair}.\n'
                     f'RSI:{indicators.get("rsi","?")} ADX:{indicators.get("adx","?")} '
                     f'Regime:{indicators.get("regime","?")} Confidence:{confidence}%\n'
-                    f'News sentiment:{sentiment_score}/100 (50=neutral)\n'
-                    f'Recent news:\n{heads or "None"}\n\n'
+                    f'Crypto sentiment:{sentiment_score}/100\n'
+                    f'\n{macro_summary}\n'
+                    f'Recent crypto news:\n{heads or "None"}\n\n'
                     f'Evaluation rules:\n'
                     f'- Consider macro context: if S&P/Nasdaq down >2% today, be MORE cautious on BUYs\n'
                     f'- If VIX > 30, market fear is high — prefer tighter setups only\n'
