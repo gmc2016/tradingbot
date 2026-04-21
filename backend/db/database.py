@@ -43,6 +43,11 @@ def init_db():
         ('last_scan_at',''), ('last_scan_result',''),
         ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
         ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
+        ('trading_mode_scalp','false'),
+        ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
+        ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
+        ('scalp_pairs','BTC/USDT,ETH/USDT'),
+        ('demo_fee_rate','0.1'),
     ]
     for k, v in defaults:
         c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (k, v))
@@ -59,11 +64,26 @@ def init_db():
         ('partial_close_enabled','true'), ('partial_close_at_pct','0.8'), ('max_positions','5'),
         ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
         ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
+        ('trading_mode_scalp','false'),
+        ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
+        ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
+        ('scalp_pairs','BTC/USDT,ETH/USDT'),
+        ('demo_fee_rate','0.1'),
         ('anthropic_api_key', os.environ.get('ANTHROPIC_API_KEY','')),
         ('binance_api_key',   os.environ.get('BINANCE_API_KEY','')),
         ('binance_api_secret',os.environ.get('BINANCE_API_SECRET','')),
         ('newsapi_key',       os.environ.get('NEWSAPI_KEY','')),
     ]
+    # Add scalp settings if missing
+    scalp_defaults = [
+        ('trading_mode_scalp','false'),('scalp_tp_pct','0.4'),
+        ('scalp_sl_pct','0.25'),('scalp_trail_pct','0.2'),
+        ('scalp_pos_size','100'),('scalp_pairs','BTC/USDT,ETH/USDT'),
+        ('demo_fee_rate','0.1'),
+    ]
+    for k,v in scalp_defaults:
+        c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,v))
+
     # Force update partial_close_at_pct if still at old default 1.5
     try:
         cur_pc = c.execute("SELECT value FROM settings WHERE key='partial_close_at_pct'").fetchone()
