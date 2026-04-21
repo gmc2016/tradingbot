@@ -45,10 +45,11 @@ function MacroRow({ label, price, change, unit='', hint }) {
   )
 }
 
-export default function MacroPanel() {
+export default function MacroPanel({ expanded: extExpanded, onToggle }) {
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(true)
-  const [expanded,setExpanded]= useState(false)
+  const [_expanded,setExpanded]= useState(false)
+  const expanded = extExpanded !== undefined ? extExpanded : _expanded
 
   const load = async () => {
     try {
@@ -84,7 +85,7 @@ export default function MacroPanel() {
   return (
     <div style={{background:'var(--bg-surface)',borderTop:'1px solid var(--border)',flexShrink:0}}>
       {/* Collapsed header — always visible */}
-      <div onClick={()=>setExpanded(v=>!v)}
+      <div onClick={()=>{ setExpanded(v=>!v); onToggle&&onToggle() }}
         style={{display:'flex',alignItems:'center',gap:10,padding:'5px 12px',
           cursor:'pointer',userSelect:'none'}}
         onMouseEnter={e=>e.currentTarget.style.background='var(--bg-hover)'}
