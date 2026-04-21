@@ -113,6 +113,150 @@ def calculate_scalp_signal(df, pair):
 
     return 'HOLD', 0, f'Mixed (B:{score_buy} S:{score_sell} need 4)'
 
+def get_scalp_context():
+    """
+    Read all cached context for smart scalp decisions.
+    Zero API calls — reads only from memory/DB caches.
+    Returns a context dict the signal function uses.
+    """
+    ctx = {
+        'macro_risk':   'low',
+        'macro_score':  0,
+        'fear_greed':   50,
+        'vix':          20,
+        'sp500_chg':    0.0,
+        'news_bearish': False,
+        'news_bullish': False,
+        'brain_bias':   'neutral',   # from last brain decision
+        'block_buy':    False,
+        'block_sell':   False,
+        'conf_adjust':  0,           # +/- confidence adjustment
+        'reasons':      [],
+    }
+
+    # ── Macro indicators (already cached in memory) ─────────────────────────
+    try:
+        from bot.macro import _macro_cache, get_macro_risk_level
+        if _macro_cache:
+            risk = get_macro_risk_level(_macro_cache)
+            ctx['macro_risk']  = risk['level']
+            ctx['macro_score'] = risk['score']
+            ctx['fear_greed']  = risk.get('fear_greed', 50)
+            ctx['vix']         = risk.get('vix', 20)
+            ctx['sp500_chg']   = risk.get('sp500_chg', 0.0)
+
+            if risk['level'] == 'extreme':
+                ctx['block_buy'] = ctx['block_sell'] = True
+                ctx['reasons'].append('Macro EXTREME — all scalp blocked')
+            elif risk['level'] == 'high':
+                ctx['block_buy'] = True
+                ctx['conf_adjust'] -= 10
+                ctx['reasons'].append(f'Macro HIGH risk — BUY blocked')
+            elif risk['score'] >= 20:
+                ctx['conf_adjust'] -= 5
+                ctx['reasons'].append(f'Macro cautious (score:{risk["score"]})')
+
+            fg = ctx['fear_greed']
+            if fg <= 20:
+                ctx['block_buy'] = True
+                ctx['reasons'].append(f'F&G={fg} Extreme Fear — no BUY scalps')
+            elif fg <= 35:
+                ctx['conf_adjust'] -= 8
+                ctx['reasons'].append(f'F&G={fg} Fear — reduced BUY confidence')
+            elif fg >= 80:
+                ctx['block_sell'] = True
+                ctx['reasons'].append(f'F&G={fg} Extreme Greed — no SELL scalps')
+
+            if ctx['vix'] > 30:
+                ctx['conf_adjust'] -= 10
+                ctx['reasons'].append(f'VIX={ctx["vix"]:.0f} high fear')
+
+            sp = ctx['sp500_chg']
+            if sp < -1.5:
+                ctx['block_buy'] = True
+                ctx['reasons'].append(f'S&P {sp:.1f}% — risk-off, no BUY')
+            elif sp < -0.8:
+                ctx['conf_adjust'] -= 8
+                ctx['reasons'].append(f'S&P {sp:.1f}% weak')
+            elif sp > 1.0:
+                ctx['conf_adjust'] += 5
+                ctx['reasons'].append(f'S&P +{sp:.1f}% risk-on boost')
+    except Exception as e:
+        logger.debug(f'Scalp macro context: {e}')
+
+    # ── News headlines (already cached in DB) ──────────────────────────────
+    try:
+        from db.database import get_news
+        news = get_news(20)
+        btc_keywords  = ['bitcoin','btc']
+        eth_keywords  = ['ethereum','eth']
+        bad_keywords  = ['hack','exploit','ban','crash','seized','arrest',
+                         'fraud','collapse','investigation','sanction','war','attack']
+        good_keywords = ['rally','surge','institutional','etf','adoption',
+                         'approval','breakthrough','record','bullish','inflow']
+
+        recent_titles = ' '.join((n.get('title','') or '').lower() for n in news[:10])
+        crypto_news   = [n for n in news[:15] if any(k in (n.get('title','') or '').lower()
+                         for k in btc_keywords+eth_keywords)]
+
+        bad_count  = sum(1 for k in bad_keywords  if k in recent_titles)
+        good_count = sum(1 for k in good_keywords if k in recent_titles)
+
+        if bad_count >= 3:
+            ctx['news_bearish'] = True
+            ctx['block_buy']    = True
+            ctx['conf_adjust'] -= 10
+            ctx['reasons'].append(f'News: {bad_count} negative headlines — BUY blocked')
+        elif bad_count >= 2:
+            ctx['conf_adjust'] -= 5
+            ctx['reasons'].append(f'News: {bad_count} negative headlines')
+
+        if good_count >= 3:
+            ctx['news_bullish'] = True
+            ctx['conf_adjust'] += 8
+            ctx['reasons'].append(f'News: {good_count} positive headlines — boost')
+
+        # Check sentiment scores from cached analysis
+        btc_sent = next((n for n in news if 'BTC' in (n.get('title','') or '').upper()
+                         or 'bitcoin' in (n.get('title','') or '').lower()), None)
+        if btc_sent and btc_sent.get('sentiment_score') is not None:
+            score = btc_sent['sentiment_score']
+            if score < -0.5:
+                ctx['block_buy'] = True
+                ctx['reasons'].append(f'BTC sentiment very negative ({score:.2f})')
+            elif score < -0.2:
+                ctx['conf_adjust'] -= 8
+    except Exception as e:
+        logger.debug(f'Scalp news context: {e}')
+
+    # ── Brain last decision (already in DB) ────────────────────────────────
+    try:
+        from db.database import get_setting
+        import json
+        brain_log = json.loads(get_setting('brain_log') or '[]')
+        if brain_log:
+            last = brain_log[0]
+            market = last.get('market', 'ranging')
+            action = last.get('action', 'NO_CHANGE')
+            if market == 'trending_bull':
+                ctx['brain_bias'] = 'bullish'
+                ctx['conf_adjust'] += 8
+                ctx['block_sell'] = True   # don't fight the trend
+                ctx['reasons'].append('Brain: trending bull — SELL scalps blocked')
+            elif market == 'trending_bear':
+                ctx['brain_bias'] = 'bearish'
+                ctx['conf_adjust'] += 8
+                ctx['block_buy'] = True    # don't fight the trend
+                ctx['reasons'].append('Brain: trending bear — BUY scalps blocked')
+            elif market == 'ranging':
+                ctx['brain_bias'] = 'neutral'
+                ctx['reasons'].append('Brain: ranging — both directions OK')
+    except Exception as e:
+        logger.debug(f'Scalp brain context: {e}')
+
+    return ctx
+
+
 def run_scalp_cycle():
     """Main scalp cycle — runs every 30 seconds."""
     from db.database import get_setting, set_setting
@@ -127,6 +271,9 @@ def run_scalp_cycle():
 
     cfg  = get_scalp_config()
     mode = get_setting('trading_mode') or 'demo'
+
+    # Get smart context once per cycle (zero API calls)
+    ctx = get_scalp_context()
 
     # ── Check open scalp positions ──────────────────────────────────────────
     open_trades = [t for t in get_open_trades() if t.get('strategy_reason','').startswith('Scalp')]
@@ -182,7 +329,24 @@ def run_scalp_cycle():
         if df is None or len(df) < 30: continue
 
         sig, conf, reason = calculate_scalp_signal(df, pair)
-        if sig == 'HOLD' or conf < 55: continue
+        if sig == 'HOLD': continue
+
+        # Apply smart context filters
+        if sig == 'BUY'  and ctx['block_buy']:
+            logger.debug(f'Scalp BUY {pair} blocked: {ctx["reasons"]}')
+            continue
+        if sig == 'SELL' and ctx['block_sell']:
+            logger.debug(f'Scalp SELL {pair} blocked: {ctx["reasons"]}')
+            continue
+
+        # Apply confidence adjustment from macro/news/brain
+        adj_conf = max(0, min(100, conf + ctx['conf_adjust']))
+        if adj_conf < 55: continue
+
+        # Build enriched reason string
+        ctx_summary = ' | '.join(ctx['reasons'][:2]) if ctx['reasons'] else ''
+        full_reason = f'Scalp: {reason}'
+        if ctx_summary: full_reason += f' [{ctx_summary}]'
 
         ticker = fetch_ticker(pair)
         if not ticker: continue
@@ -200,11 +364,15 @@ def run_scalp_cycle():
             order = place_market_order(pair, sig, qty, mode=mode)
             fill  = order.get('price', price)
             tid   = insert_trade(mode, pair, sig, fill, qty, sl, tp,
-                                 f'Scalp: {reason}', order.get('id'))
+                                 full_reason, order.get('id'))
             if mode == 'demo': adj_demo(-pos)
-            alog('trade', f"SCALP OPENED {sig} {pair} @ {fill:.4f} TP:{tp:.4f} SL:{sl:.4f}",
+            alog('trade',
+                 f"SCALP OPENED {sig} {pair} @ {fill:.4f} TP:{tp:.4f} SL:{sl:.4f} "
+                 f"(conf:{adj_conf}% macro:{ctx['macro_risk']} F&G:{ctx['fear_greed']})",
                  level='success',
                  detail={'pair':pair,'side':sig,'price':fill,'sl':sl,'tp':tp,
-                         'qty':qty,'id':tid,'conf':conf,'mode':mode})
+                         'qty':qty,'id':tid,'conf':adj_conf,'mode':mode,
+                         'macro_risk':ctx['macro_risk'],'fear_greed':ctx['fear_greed'],
+                         'brain_bias':ctx['brain_bias']})
         except Exception as e:
             logger.error(f'Scalp order {pair}: {e}')
