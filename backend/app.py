@@ -237,7 +237,7 @@ def brain_cycle():
 scheduler = BackgroundScheduler()
 scheduler.add_job(bot_cycle,    'interval',minutes=5,  id='bot',    max_instances=1,misfire_grace_time=60)
 scheduler.add_job(news_cycle,   'interval',minutes=15, id='news',   max_instances=1,misfire_grace_time=120)
-scheduler.add_job(cache_cycle,  'interval',minutes=1,  id='cache',  max_instances=1,misfire_grace_time=30)
+scheduler.add_job(cache_cycle,  'interval',minutes=1,  id='cache',  max_instances=1,misfire_grace_time=90,coalesce=True)
 scheduler.add_job(macro_cycle,  'interval',minutes=15, id='macro',  max_instances=1,misfire_grace_time=60)
 scheduler.add_job(scanner_cycle,'interval',hours=6,    id='scanner',max_instances=1,misfire_grace_time=300)
 scheduler.add_job(brain_cycle,  'interval',minutes=30, id='brain',  max_instances=1,misfire_grace_time=120)
