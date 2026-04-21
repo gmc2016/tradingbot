@@ -84,3 +84,82 @@ input:focus, select:focus, textarea:focus {
 
 .pos { color: var(--green); }
 .neg { color: var(--red); }
+
+/* ── Mobile Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Sidebar hidden on mobile, shown via toggle */
+  .sidebar-desktop { display: none !important; }
+
+  /* Stack main layout */
+  .main-layout {
+    flex-direction: column !important;
+  }
+
+  /* KPI cards stack 2x2 */
+  .kpi-bar {
+    flex-wrap: wrap !important;
+  }
+  .kpi-card {
+    min-width: calc(50% - 8px) !important;
+    flex: 1 1 calc(50% - 8px) !important;
+  }
+
+  /* Chart full width */
+  .chart-container {
+    min-height: 280px !important;
+  }
+
+  /* Right panel below chart */
+  .right-panel {
+    width: 100% !important;
+    max-height: 300px !important;
+    border-left: none !important;
+    border-top: 1px solid var(--border) !important;
+  }
+
+  /* Action bar scrollable */
+  .action-bar {
+    overflow-x: auto !important;
+    gap: 4px !important;
+  }
+  .action-bar button {
+    font-size: 10px !important;
+    padding: 4px 8px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Topbar compact */
+  .topbar-stats { display: none !important; }
+  .topbar-llm   { display: none !important; }
+
+  /* Ticker strip compact */
+  .ticker-strip { font-size: 10px !important; }
+
+  /* Macro panel compact */
+  .macro-grid { grid-template-columns: 1fr !important; }
+
+  /* Trades table horizontal scroll */
+  .trades-table { overflow-x: auto !important; }
+  .trades-table table { min-width: 600px !important; }
+
+  /* Pairs sidebar as horizontal scroll on mobile */
+  .pairs-list {
+    display: flex !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    width: 100% !important;
+    max-height: 60px !important;
+    padding: 4px !important;
+  }
+  .pair-item {
+    flex-shrink: 0 !important;
+    min-width: 80px !important;
+    margin-right: 4px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .kpi-card { min-width: 100% !important; }
+  .topbar-mode { display: none !important; }
+}
