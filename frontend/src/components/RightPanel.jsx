@@ -3,14 +3,14 @@ import React from 'react'
 function formatPrice(p){ if(!p)return'—'; if(p>1000)return p.toLocaleString('en-US',{maximumFractionDigits:0}); if(p>1)return p.toFixed(3); return p.toFixed(5) }
 function timeAgo(iso){ if(!iso)return''; const m=Math.floor((Date.now()-new Date(iso).getTime())/60000); if(m<1)return'just now'; if(m<60)return`${m}m ago`; return`${Math.floor(m/60)}h ago` }
 
-export default function RightPanel({ openTrades=[], pairs=[], news=[], config={} }) {
+export default function RightPanel({ openTrades=[], pairs=[], news=[], config={}, prices={} }) {
   return (
     <div style={{width:270,flexShrink:0,background:'var(--bg-surface)',borderLeft:'1px solid var(--border)',display:'flex',flexDirection:'column',overflow:'hidden'}}>
 
       <Section title={`Open positions (${openTrades.length})`}>
         {openTrades.length===0
           ? <Empty>No open positions</Empty>
-          : openTrades.map(t=><PositionCard key={t.id} trade={t} config={config}/>)}
+          : openTrades.map(t=><PositionCard key={t.id} trade={t} config={config} prices={prices}/>)}
       </Section>
 
       <Section title="AI Sentiment">
@@ -36,7 +36,7 @@ function Section({title,children,flex}){
 }
 function Empty({children}){ return <div style={{fontSize:12,color:'var(--text-3)'}}>{children}</div> }
 
-function PositionCard({trade:t, config}){
+function PositionCard({trade:t, config, prices={}}){
   const pnl = t.unrealized_pnl??t.pnl
   const c   = pnl==null?'var(--text-2)':pnl>=0?'var(--green)':'var(--red)'
   const pnlPct = t.entry_price ? ((pnl||0)/(t.entry_price*t.quantity)*100).toFixed(1) : 0
@@ -51,8 +51,26 @@ function PositionCard({trade:t, config}){
           {pnl!=null&&<span style={{fontSize:10,color:c,marginLeft:4}}>({pnlPct}%)</span>}
         </div>
       </div>
+      <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+        <span style={{fontSize:11,color:'var(--text-3)'}}>Entry</span>
+        <span style={{fontSize:11,fontFamily:'monospace',color:'var(--text-2)'}}>{formatPrice(t.entry_price)}</span>
+      </div>
+      {prices[t.pair] && (
+        <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+          <span style={{fontSize:11,color:'var(--text-3)'}}>Current</span>
+          <span style={{fontSize:12,fontFamily:'monospace',fontWeight:700,
+            color:(prices[t.pair].price > t.entry_price && t.side==='BUY') ||
+                  (prices[t.pair].price < t.entry_price && t.side==='SELL')
+                  ? 'var(--green)' : 'var(--red)'}}>
+            {formatPrice(prices[t.pair].price)}
+            <span style={{fontSize:9,marginLeft:3,color:(prices[t.pair].change||0)>=0?'var(--green)':'var(--red)'}}>
+              {(prices[t.pair].change||0)>=0?'▲':'▼'}{Math.abs(prices[t.pair].change||0).toFixed(2)}%
+            </span>
+          </span>
+        </div>
+      )}
       <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
-        <span style={{fontSize:11,color:'var(--text-2)'}}>Entry: {formatPrice(t.entry_price)}</span>
+        <span style={{fontSize:10,color:'var(--text-3)'}}>{t.strategy_reason?.includes('Scalp')?'⚡ Scalp':'🧠 Smart'}</span>
         <span className={`badge badge-${(t.side||'').toLowerCase()}`}>{t.side}</span>
       </div>
       <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
