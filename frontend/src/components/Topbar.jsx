@@ -1,9 +1,12 @@
 import React from 'react'
+import axios from 'axios'
 
-export default function Topbar({ data, connected, onStart, onStop, onModeChange }) {
-  const running = data?.bot_running
-  const mode    = data?.mode || 'demo'
-  const stats   = data?.stats || {}
+export default function Topbar({ data, connected, onStart, onStop, onModeChange, scalp, onScalpToggle }) {
+  const running   = data?.bot_running
+  const mode      = data?.mode || 'demo'
+  const stats     = data?.stats || {}
+  const llmToday  = data?.llm_today || 0
+  const llmCost   = data?.llm_cost_today || 0
 
   return (
     <div style={{
@@ -11,118 +14,102 @@ export default function Topbar({ data, connected, onStart, onStop, onModeChange 
       background: 'var(--bg-surface)',
       borderBottom: '1px solid var(--border)',
       display: 'flex', alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '0 16px', gap: 12,
+      padding: '0 12px', gap: 10, zIndex: 100,
     }}>
-      {/* Left */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
-          📈 Trading Bot
+      {/* Brand */}
+      <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+        <span style={{ fontSize:20 }}>⚡</span>
+        <span style={{ fontWeight:700, fontSize:14 }}>Trading Bot</span>
+      </div>
+
+      {/* DEMO / LIVE */}
+      <div style={{ display:'flex', gap:2, background:'var(--bg-card)',
+        borderRadius:6, padding:2, flexShrink:0 }}>
+        {['demo','live'].map(m => (
+          <button key={m} onClick={()=>onModeChange(m)} style={{
+            padding:'3px 10px', borderRadius:4, fontSize:11, fontWeight:600,
+            background: mode===m ? (m==='live'?'var(--red)':'var(--blue)') : 'transparent',
+            color: mode===m ? '#fff' : 'var(--text-3)',
+            border:'none', cursor:'pointer', textTransform:'uppercase',
+          }}>{m}</button>
+        ))}
+      </div>
+
+      {/* SMART / SCALP toggle */}
+      <div style={{ display:'flex', gap:2, background:'var(--bg-card)',
+        borderRadius:6, padding:2, flexShrink:0 }}>
+        <button onClick={()=>onScalpToggle(false)} style={{
+          padding:'3px 10px', borderRadius:4, fontSize:11, fontWeight:600,
+          background: !scalp ? 'var(--teal)' : 'transparent',
+          color: !scalp ? '#fff' : 'var(--text-3)',
+          border:'none', cursor:'pointer',
+        }}>🧠 Smart</button>
+        <button onClick={()=>onScalpToggle(true)} style={{
+          padding:'3px 10px', borderRadius:4, fontSize:11, fontWeight:600,
+          background: scalp ? 'var(--amber)' : 'transparent',
+          color: scalp ? '#000' : 'var(--text-3)',
+          border:'none', cursor:'pointer',
+        }}>⚡ Scalp</button>
+      </div>
+
+      {/* Scalp indicator */}
+      {scalp && (
+        <span style={{ fontSize:10, color:'var(--amber)', fontWeight:600,
+          background:'rgba(245,158,11,.15)', padding:'2px 8px', borderRadius:10,
+          flexShrink:0 }}>
+          30s cycles · BTC/ETH · 0.4% target · no AI
         </span>
+      )}
 
-        {/* Mode toggle */}
-        <div style={{
-          display: 'flex', overflow: 'hidden',
-          border: '1px solid var(--border)', borderRadius: 6,
-          background: 'var(--bg-base)',
-        }}>
-          {['demo', 'live'].map(m => (
-            <button key={m} onClick={() => onModeChange(m)} style={{
-              padding: '4px 14px', fontSize: 11, fontWeight: 600,
-              textTransform: 'uppercase', letterSpacing: 0.4,
-              background: mode === m
-                ? (m === 'live' ? 'var(--green-bg)' : 'var(--blue-bg)')
-                : 'transparent',
-              color: mode === m
-                ? (m === 'live' ? 'var(--green)' : 'var(--blue)')
-                : 'var(--text-3)',
-            }}>{m}</button>
-          ))}
+      {/* LLM cost */}
+      {!scalp && (
+        <div style={{ fontSize:11, color:'var(--text-3)',
+          background:'var(--bg-card)', padding:'3px 8px',
+          borderRadius:6, flexShrink:0, display:'flex', gap:4 }}>
+          <span>🤖</span>
+          <span>{llmToday} calls today</span>
+          <span style={{color:'var(--text-2)'}}>≈${llmCost.toFixed(4)}</span>
         </div>
+      )}
 
-        {mode === 'live' && (
-          <span style={{
-            fontSize: 11, fontWeight: 600, color: 'var(--red)',
-            background: 'var(--red-bg)', border: '1px solid var(--red-dim)',
-            borderRadius: 6, padding: '3px 10px',
-          }}>⚠ LIVE — REAL FUNDS</span>
-        )}
+      {/* Connection status */}
+      <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0 }}>
+        <div style={{ width:6, height:6, borderRadius:'50%',
+          background: connected ? 'var(--green)' : 'var(--red)' }}/>
+        <span style={{ fontSize:11, color:'var(--text-3)' }}>
+          {connected ? 'Live' : 'Offline'}
+        </span>
       </div>
 
-      {/* Right */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        {/* LLM usage today */}
-        {data?.llm_today > 0 && (
-          <div style={{display:'flex',alignItems:'center',gap:5,padding:'3px 10px',
-            background:'rgba(168,85,247,.1)',border:'1px solid rgba(168,85,247,.25)',borderRadius:6}}>
-            <span style={{fontSize:10,color:'#a855f7'}}>🤖</span>
-            <span style={{fontSize:11,color:'#a855f7'}}>{data.llm_today} calls today</span>
-            <span style={{fontSize:11,color:'rgba(168,85,247,.6)'}}>≈${data.llm_cost_today}</span>
+      <div style={{ flex:1 }}/>
+
+      {/* Stats */}
+      <div style={{ display:'flex', gap:16, alignItems:'center' }}>
+        {[
+          ['Win rate', stats.win_rate != null ? `${stats.win_rate}%` : '—'],
+          ['Total P&L', stats.total_pnl != null ? `${stats.total_pnl >= 0 ? '+' : ''}$${(stats.total_pnl||0).toFixed(2)}` : '—'],
+          ['Trades', stats.total_trades || 0],
+        ].map(([label, val]) => (
+          <div key={label} style={{ textAlign:'center' }}>
+            <div style={{ fontSize:9, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:.5 }}>{label}</div>
+            <div style={{ fontSize:13, fontWeight:700, color: label==='Total P&L' ? ((stats.total_pnl||0)>=0?'var(--green)':'var(--red)') : 'var(--text)' }}>{val}</div>
           </div>
-        )}
-
-        {/* WS dot */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <div style={{
-            width: 7, height: 7, borderRadius: '50%',
-            background: connected ? 'var(--green)' : 'var(--red)',
-          }} />
-          <span style={{ fontSize: 11, color: 'var(--text-2)' }}>
-            {connected ? 'Live' : 'Offline'}
-          </span>
-        </div>
-
-        {/* Stats strip */}
-        <div style={{
-          display: 'flex', gap: 16, padding: '4px 14px',
-          background: 'var(--bg-base)', border: '1px solid var(--border)',
-          borderRadius: 6,
-        }}>
-          <MiniStat label="Win rate"   value={`${stats.win_rate || 0}%`} />
-          <MiniStat label="Total P&L"  value={`${(stats.total_pnl||0) >= 0 ? '+' : ''}$${stats.total_pnl || 0}`}
-                    color={(stats.total_pnl||0) >= 0 ? 'var(--green)' : 'var(--red)'} />
-          <MiniStat label="Trades"     value={stats.total_trades || 0} />
-        </div>
-
-        {/* Bot control */}
-        {running ? (
-          <button onClick={onStop} style={{
-            padding: '6px 16px', borderRadius: 6, fontWeight: 600,
-            background: 'var(--red-bg)', border: '1px solid var(--red-dim)',
-            color: 'var(--red)',
-          }}>Stop bot</button>
-        ) : (
-          <button onClick={onStart} style={{
-            padding: '6px 16px', borderRadius: 6, fontWeight: 600,
-            background: 'var(--green-bg)', border: '1px solid var(--green-dim)',
-            color: 'var(--green)',
-          }}>Start bot</button>
-        )}
-
-        {running && (
-          <span style={{ fontSize: 11, color: 'var(--green)', display: 'flex', alignItems: 'center', gap: 5 }}>
-            <PulseDot /> Running
-          </span>
-        )}
+        ))}
       </div>
-    </div>
-  )
-}
 
-function MiniStat({ label, value, color }) {
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 1 }}>{label}</div>
-      <div style={{ fontSize: 12, fontWeight: 600, color: color || 'var(--text)' }}>{value}</div>
-    </div>
-  )
-}
+      {/* Start/Stop */}
+      <button onClick={running ? onStop : onStart} style={{
+        padding:'6px 16px', borderRadius:6, fontWeight:600, fontSize:12,
+        background: running ? 'var(--red)' : 'var(--green)',
+        color:'#fff', border:'none', cursor:'pointer', flexShrink:0,
+      }}>
+        {running ? 'Stop bot' : 'Start bot'}
+      </button>
 
-function PulseDot() {
-  return (
-    <>
-      <style>{`@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.5)}}`}</style>
-      <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', animation: 'pulse 1.5s infinite' }} />
-    </>
+      {/* Running indicator */}
+      {running && (
+        <span style={{ fontSize:11, color:'var(--green)', flexShrink:0 }}>● Running</span>
+      )}
+    </div>
   )
 }
