@@ -23,6 +23,10 @@ _cache       = {'pairs':[],'sentiments':{},'last_update':None}
 _loss_streak = {}
 _llm_calls_today = {'count':0,'date':None}
 
+def set_cooldown_scalp(pair, minutes=10):
+    from bot.strategy import set_cooldown
+    set_cooldown(pair, minutes)
+
 def increment_llm_counter():
     from datetime import date
     today = date.today().isoformat()
@@ -140,8 +144,12 @@ def check_open_positions():
             pnl = (cp-entry)*qty if side=='BUY' else (entry-cp)*qty
             try: place_market_order(t['pair'],'SELL' if side=='BUY' else 'BUY',qty,mode=mode)
             except: continue
-            close_trade(t['id'],cp,pnl)
-            if mode=='demo': adj_demo(pnl)
+            # Deduct fees in demo mode for realistic P&L
+            fee_rate = float(_s('demo_fee_rate','0.1')) / 100
+            fee      = (entry * qty * fee_rate) + (cp * qty * fee_rate)
+            pnl_after_fee = pnl - fee
+            close_trade(t['id'],cp,pnl_after_fee)
+            if mode=='demo': adj_demo(pnl_after_fee + cfg['position_size_usdt'])
             closed_by = 'TP' if ((side=='BUY' and cp>=tp) or (side=='SELL' and cp<=tp)) else 'SL'
             # With trailing: closing at "TP" often means trailing stop triggered = profit locked
             level = 'success' if pnl>=0 else 'warning'
@@ -253,7 +261,7 @@ def scan_and_trade():
                 order=place_market_order(pair,sig,qty,mode=mode)
                 fill=order.get('price',price)
                 tid=insert_trade(mode,pair,sig,fill,qty,sl,tp,reason,order.get('id'))
-                if mode=='demo': adj_demo(-pos)
+                if mode=='demo': adj_demo(-tiered_pos)
                 open_cnt+=1
                 alog('trade',f"OPENED {sig} {pair} @ {fill:.6g} SL:{sl:.6g} TP:{tp:.6g}",
                      level='success',
