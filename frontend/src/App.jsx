@@ -21,6 +21,12 @@ import MacroPanel    from './components/MacroPanel'
 
 function Dashboard({ auth, logout }) {
   const { data, connected, prices, startBot, stopBot, setMode, runNow, refreshNews, updateSettings } = useDashboard()
+  const [scalp, setScalp] = useState(false)
+  const toggleScalp = async (val) => {
+    setScalp(val)
+    await axios.post('/api/settings',{trading_mode_scalp: val ? 'true' : 'false'},{withCredentials:true})
+    runNow()
+  }
   const [selectedPair,  setSelectedPair]  = useState('BTC/USDT')
   const [showSettings,  setShowSettings]  = useState(false)
   const [showHistory,   setShowHistory]   = useState(false)
@@ -76,7 +82,7 @@ function Dashboard({ auth, logout }) {
 
   return (
     <div style={{display:'flex',flexDirection:'column',height:'100vh',overflow:'hidden'}}>
-      <Topbar data={{...data,pairs}} connected={connected} onStart={startBot} onStop={stopBot} onModeChange={handleModeChange}/>
+      <Topbar data={{...data,pairs}} connected={connected} onStart={startBot} onStop={stopBot} onModeChange={handleModeChange} scalp={scalp} onScalpToggle={toggleScalp}/>
 
       <div style={{background:'var(--bg-surface)',borderBottom:'1px solid var(--border)',padding:'4px 12px',display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
         {actionBtns.map(([label,fn])=>(
@@ -113,7 +119,7 @@ function Dashboard({ auth, logout }) {
           <TradesTable trades={recent_trades} mode={mode}/>
           <MacroPanel expanded={showMacro} onToggle={()=>setShowMacro(v=>!v)}/>
         </div>
-        <RightPanel openTrades={open_trades} pairs={pairs} news={news} config={config}/>
+        <RightPanel openTrades={open_trades} pairs={pairs} news={news} config={config} prices={prices}/>
       </div>
 
       {showSettings&&<SettingsModal config={config} onSave={updateSettings} onClose={()=>setShowSettings(false)} onLogout={logout} username={auth?.username||'admin'}/>}
