@@ -71,7 +71,7 @@ function Dashboard({ auth, logout }) {
     ['🧠 AI Brain',      () => setShowBrain(true)],
     ['📡 Activity',      () => setShowActivity(true)],
     ['👁 Watchlist',     () => setShowWatchlist(true)],
-    ['🌍 Macro',         () => setShowMacro(true)],
+    ['🌍 Macro',         () => setShowMacro(v => !v)],
   ]
 
   return (
@@ -111,7 +111,7 @@ function Dashboard({ auth, logout }) {
           <KpiBar stats={stats} openTrades={open_trades} maxPositions={config.max_positions||5}/>
           <ChartPanel symbol={selectedPair} trades={recent_trades}/>
           <TradesTable trades={recent_trades} mode={mode}/>
-          <MacroPanel/>
+          <MacroPanel expanded={showMacro} onToggle={()=>setShowMacro(v=>!v)}/>
         </div>
         <RightPanel openTrades={open_trades} pairs={pairs} news={news} config={config}/>
       </div>
