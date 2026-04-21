@@ -396,6 +396,7 @@ def get_dashboard_data():
             'last_scan_at':          _s('last_scan_at',''),
             'pinned_pairs':          _s('pinned_pairs','BTC/USDT,ETH/USDT'),
             'ai_brain_enabled':      _s('ai_brain_enabled','false'),
+            'trading_mode_scalp':    _s('trading_mode_scalp','false'),
             'anthropic_key_set':     bool(get_setting('anthropic_api_key') not in (None,'','None')),
         }
     }
