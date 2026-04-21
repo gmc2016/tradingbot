@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useAuth, useDashboard } from './hooks/useDashboard'
 import LoginPage      from './components/LoginPage'
@@ -23,6 +23,14 @@ import MacroPanel    from './components/MacroPanel'
 function Dashboard({ auth, logout }) {
   const { data, connected, prices, startBot, stopBot, setMode, runNow, refreshNews, updateSettings } = useDashboard()
   const [scalp, setScalp] = useState(false)
+
+  // Sync scalp state from backend on load and on data changes
+  useEffect(() => {
+    const backendScalp = data?.config?.trading_mode_scalp === 'true' ||
+                         data?.config?.trading_mode_scalp === true
+    setScalp(backendScalp)
+  }, [data?.config?.trading_mode_scalp])
+
   const toggleScalp = async (val) => {
     setScalp(val)
     await axios.post('/api/settings',{trading_mode_scalp: val ? 'true' : 'false'},{withCredentials:true})
