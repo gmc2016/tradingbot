@@ -11,10 +11,12 @@ logger = logging.getLogger(__name__)
 EXCLUDE = {
     'USDC/USDT','BUSD/USDT','TUSD/USDT','USDP/USDT','FDUSD/USDT',
     'WBTC/USDT','WETH/USDT','WBNB/USDT','STETH/USDT','LUNC/USDT',
-    # Micro-caps — illiquid, wide spreads, false signals
+    # Micro-caps + underperforming pairs — illiquid, wide spreads, false signals
     'SPK/USDT','GUN/USDT','CFG/USDT','PROM/USDT','UTK/USDT',
     'HIGH/USDT','SUPER/USDT','GIGGLE/USDT','AUDIO/USDT','ONT/USDT',
     'ALICE/USDT','PORTAL/USDT','MOVR/USDT','ENJ/USDT','ORDI/USDT',
+    # Consistently underperforming — removed based on trade data
+    'ENJ/USDT',
 }
 
 # Quality coins by sector — scanner will prefer these
