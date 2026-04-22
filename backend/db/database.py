@@ -30,7 +30,7 @@ def init_db():
         ('max_positions','5'), ('stop_loss_pct','1.5'), ('take_profit_pct','3.0'),
         ('position_size_usdt','100'),
         ('trading_mode', os.environ.get('TRADING_MODE','demo')),
-        ('active_pairs','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,MATIC/USDT,NEAR/USDT,UNI/USDT'),
+        ('active_pairs','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT'),
         ('bot_running','false'), ('starting_balance','1000'),
         ('trailing_stop_enabled','true'), ('trailing_stop_pct','0.8'),
         ('partial_close_enabled','true'), ('partial_close_at_pct','0.8'),
@@ -46,7 +46,7 @@ def init_db():
         ('trading_mode_scalp','false'),
         ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
         ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
-        ('scalp_pairs','BTC/USDT,ETH/USDT'),
+        ('scalp_pairs','BTC/USDT,ETH/USDT,SOL/USDT'),
         ('demo_fee_rate','0.1'),
     ]
     for k, v in defaults:
@@ -67,13 +67,28 @@ def init_db():
         ('trading_mode_scalp','false'),
         ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
         ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
-        ('scalp_pairs','BTC/USDT,ETH/USDT'),
+        ('scalp_pairs','BTC/USDT,ETH/USDT,SOL/USDT'),
         ('demo_fee_rate','0.1'),
         ('anthropic_api_key', os.environ.get('ANTHROPIC_API_KEY','')),
         ('binance_api_key',   os.environ.get('BINANCE_API_KEY','')),
         ('binance_api_secret',os.environ.get('BINANCE_API_SECRET','')),
         ('newsapi_key',       os.environ.get('NEWSAPI_KEY','')),
     ]
+    # Update scalp pairs to include SOL
+    try:
+        cur_sp = c.execute("SELECT value FROM settings WHERE key='scalp_pairs'").fetchone()
+        if cur_sp and cur_sp[0] == 'BTC/USDT,ETH/USDT':
+            c.execute("UPDATE settings SET value='BTC/USDT,ETH/USDT,SOL/USDT' WHERE key='scalp_pairs'")
+    except: pass
+
+    # Remove ENJ from active pairs if present
+    try:
+        cur_pairs = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
+        if cur_pairs and 'ENJ/USDT' in cur_pairs[0]:
+            new_pairs = ','.join(p for p in cur_pairs[0].split(',') if 'ENJ' not in p)
+            c.execute("UPDATE settings SET value=? WHERE key='active_pairs'", (new_pairs,))
+    except: pass
+
     # Add scalp settings if missing
     scalp_defaults = [
         ('trading_mode_scalp','false'),('scalp_tp_pct','0.4'),
@@ -100,7 +115,7 @@ def init_db():
                      'AUDIO','ONT','ALICE','PORTAL','MOVR','ENJ','ORDI']
             if any(j+'/' in pairs for j in junk):
                 c.execute("UPDATE settings SET value=? WHERE key='active_pairs'",
-                    ('BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,MATIC/USDT,NEAR/USDT,UNI/USDT',))
+                    ('BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT',))
                 c.execute("UPDATE settings SET value=? WHERE key='pinned_pairs'",
                     ('BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT',))
     except: pass
