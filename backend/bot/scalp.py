@@ -9,9 +9,9 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-SCALP_PAIRS   = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
+SCALP_PAIRS   = ['BTC/USDT', 'SOL/USDT']
 SCALP_TP_PCT  = 0.004   # 0.4%
-SCALP_SL_PCT  = 0.0025  # 0.25%
+SCALP_SL_PCT  = 0.0035  # 0.35% — wider to avoid noise stop-outs
 SCALP_TRAIL   = 0.002   # 0.2% trailing
 FEE_RATE      = 0.001   # 0.1% per side
 
@@ -104,10 +104,10 @@ def calculate_scalp_signal(df, pair):
     total = score_buy + score_sell
     if total == 0: return 'HOLD', 0, 'No signal'
 
-    if score_buy >= 3 and score_buy > score_sell:
+    if score_buy >= 4 and score_buy > score_sell:
         conf = min(95, int(score_buy / 7 * 100))
         return 'BUY', conf, ' + '.join(reasons_b[:3])
-    elif score_sell >= 3 and score_sell > score_buy:
+    elif score_sell >= 4 and score_sell > score_buy:
         conf = min(95, int(score_sell / 7 * 100))
         return 'SELL', conf, ' + '.join(reasons_s[:3])
 
@@ -288,17 +288,20 @@ def run_scalp_cycle():
         qty    = t['quantity']
         pnl_pct= (cp-entry)/entry if side=='BUY' else (entry-cp)/entry
 
-        # Trailing TP ratchet
-        if pnl_pct >= cfg['trail_pct']:
+        # Trailing TP ratchet — only activates after 0.25% profit locked
+        # Prevents Trail-TP losses from triggering too early on noise
+        MIN_PROFIT_TO_TRAIL = 0.0025  # must be 0.25% in profit before trailing starts
+        if pnl_pct >= MIN_PROFIT_TO_TRAIL and pnl_pct >= cfg['trail_pct']:
             if side == 'BUY':
                 new_tp = round(cp * (1 - cfg['trail_pct']), 8)
-                if new_tp > tp:
+                # Only move TP if it locks in at least breakeven + fees
+                if new_tp > tp and new_tp > t['entry_price'] * 1.002:
                     update_trailing_tp(t['id'], new_tp); tp = new_tp
                 new_sl = round(cp * (1 - cfg['trail_pct'] * 1.5), 8)
                 if new_sl > sl: update_trailing_stop(t['id'], new_sl); sl = new_sl
             else:
                 new_tp = round(cp * (1 + cfg['trail_pct']), 8)
-                if new_tp < tp:
+                if new_tp < tp and new_tp < t['entry_price'] * 0.998:
                     update_trailing_tp(t['id'], new_tp); tp = new_tp
 
         # Close at SL or TP
@@ -320,7 +323,7 @@ def run_scalp_cycle():
     # ── Scan for new scalp entries ──────────────────────────────────────────
     open_scalp_pairs = {t['pair'] for t in get_open_trades()
                         if t.get('strategy_reason','').startswith('Scalp')}
-    if len(open_scalp_pairs) >= 3: return  # max 3 scalp positions
+    if len(open_scalp_pairs) >= 2: return  # max 2 scalp positions (BTC+SOL)
 
     for pair in cfg['pairs']:
         if pair in open_scalp_pairs: continue
