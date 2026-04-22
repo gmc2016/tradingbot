@@ -76,7 +76,7 @@ def get_config():
     }
 
 def get_pairs_list():
-    raw = _s('active_pairs','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,MATIC/USDT,NEAR/USDT,UNI/USDT')
+    raw = _s('active_pairs','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT')
     return [p.strip() for p in raw.split(',') if p.strip()]
 
 def check_open_positions():
