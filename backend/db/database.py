@@ -46,7 +46,7 @@ def init_db():
         ('trading_mode_scalp','false'),
         ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
         ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
-        ('scalp_pairs','BTC/USDT,ETH/USDT,SOL/USDT'),
+        ('scalp_pairs','BTC/USDT,SOL/USDT'),
         ('demo_fee_rate','0.1'),
     ]
     for k, v in defaults:
@@ -67,18 +67,17 @@ def init_db():
         ('trading_mode_scalp','false'),
         ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
         ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
-        ('scalp_pairs','BTC/USDT,ETH/USDT,SOL/USDT'),
+        ('scalp_pairs','BTC/USDT,SOL/USDT'),
         ('demo_fee_rate','0.1'),
         ('anthropic_api_key', os.environ.get('ANTHROPIC_API_KEY','')),
         ('binance_api_key',   os.environ.get('BINANCE_API_KEY','')),
         ('binance_api_secret',os.environ.get('BINANCE_API_SECRET','')),
         ('newsapi_key',       os.environ.get('NEWSAPI_KEY','')),
     ]
-    # Update scalp pairs to include SOL
+    # Update scalp pairs — remove ETH, keep BTC+SOL only
     try:
-        cur_sp = c.execute("SELECT value FROM settings WHERE key='scalp_pairs'").fetchone()
-        if cur_sp and cur_sp[0] == 'BTC/USDT,ETH/USDT':
-            c.execute("UPDATE settings SET value='BTC/USDT,ETH/USDT,SOL/USDT' WHERE key='scalp_pairs'")
+        c.execute("UPDATE settings SET value='BTC/USDT,SOL/USDT' WHERE key='scalp_pairs'")
+        c.execute("UPDATE settings SET value='0.35' WHERE key='scalp_sl_pct'")
     except: pass
 
     # Remove ENJ from active pairs if present
@@ -92,12 +91,19 @@ def init_db():
     # Add scalp settings if missing
     scalp_defaults = [
         ('trading_mode_scalp','false'),('scalp_tp_pct','0.4'),
-        ('scalp_sl_pct','0.25'),('scalp_trail_pct','0.2'),
+        ('scalp_sl_pct','0.35'),('scalp_trail_pct','0.2'),
         ('scalp_pos_size','100'),('scalp_pairs','BTC/USDT,ETH/USDT'),
         ('demo_fee_rate','0.1'),
     ]
     for k,v in scalp_defaults:
         c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,v))
+
+    # Ensure trailing stop pct is at good default (brain may have changed it)
+    try:
+        cur_trail = c.execute("SELECT value FROM settings WHERE key='trailing_stop_pct'").fetchone()
+        if cur_trail and float(cur_trail[0]) < 0.5:
+            c.execute("UPDATE settings SET value='0.8' WHERE key='trailing_stop_pct'")
+    except: pass
 
     # Force update partial_close_at_pct if still at old default 1.5
     try:
