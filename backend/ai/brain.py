@@ -83,18 +83,20 @@ MARKET (active pairs): {get_market_summary()}{watchlist_ctx}
 {macro_ctx}
 
 Rules for day trading (building balance slowly with daily wins):
-- If <10 closed trades total → ALWAYS return NO_CHANGE (not enough data)
+- If <15 closed trades total → ALWAYS return NO_CHANGE (not enough data)
 - If 0 trades in 24h → NO_CHANGE (market not trading, don't tweak)
-- If win rate <40% with 10+ trades → suggest strategy change
-- If market ranging (all pairs HOLD) → use 'confluence', but DO NOT keep adjusting every cycle
+- If win rate between 55-70% → NO_CHANGE (system is performing well, leave it)
+- If win rate <45% with 15+ trades → suggest strategy change
+- If market ranging → use 'confluence', ONLY adjust if win rate <50%
 - If market trending → use 'donchian' for liquid pairs
 - If a pair has 3+ consecutive losses → add to pairs_to_pause
-- Only suggest adjustments if they meaningfully differ from current config (>0.2 change)
+- Only suggest adjustments if they differ from current config by MORE than 0.3
 - NEVER suggest stop_loss_pct >2.5 or <0.8
 - NEVER suggest take_profit_pct >6.0 or <1.5
-- NEVER reduce take_profit below stop_loss (must maintain positive risk/reward ratio)
-- Prefer NO_CHANGE over micro-adjustments — stability beats constant tweaking
-- If last 3 brain cycles all said ADJUST with no improvement → switch to NO_CHANGE
+- NEVER reduce take_profit below stop_loss × 1.5 (minimum 1.5:1 risk/reward)
+- Strongly prefer NO_CHANGE — the system has a 64% win rate overall, don't break what works
+- If last 2 brain cycles said ADJUST → return NO_CHANGE regardless (prevent oscillation)
+- Only ADJUST if there is a CLEAR, SIGNIFICANT problem — not minor fluctuations
 
 Respond JSON only:
 {{"action":"ADJUST|NO_CHANGE","reasoning":"2 sentences max",
