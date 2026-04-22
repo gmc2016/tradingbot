@@ -9,7 +9,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-SCALP_PAIRS   = ['BTC/USDT', 'ETH/USDT']
+SCALP_PAIRS   = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
 SCALP_TP_PCT  = 0.004   # 0.4%
 SCALP_SL_PCT  = 0.0025  # 0.25%
 SCALP_TRAIL   = 0.002   # 0.2% trailing
@@ -104,10 +104,10 @@ def calculate_scalp_signal(df, pair):
     total = score_buy + score_sell
     if total == 0: return 'HOLD', 0, 'No signal'
 
-    if score_buy >= 4 and score_buy > score_sell:
+    if score_buy >= 3 and score_buy > score_sell:
         conf = min(95, int(score_buy / 7 * 100))
         return 'BUY', conf, ' + '.join(reasons_b[:3])
-    elif score_sell >= 4 and score_sell > score_buy:
+    elif score_sell >= 3 and score_sell > score_buy:
         conf = min(95, int(score_sell / 7 * 100))
         return 'SELL', conf, ' + '.join(reasons_s[:3])
 
@@ -160,15 +160,15 @@ def get_scalp_context():
             if fg <= 20:
                 ctx['block_buy'] = True
                 ctx['reasons'].append(f'F&G={fg} Extreme Fear — no BUY scalps')
-            elif fg <= 35:
-                ctx['conf_adjust'] -= 8
-                ctx['reasons'].append(f'F&G={fg} Fear — reduced BUY confidence')
+            elif fg <= 25:
+                ctx['conf_adjust'] -= 4
+                ctx['reasons'].append(f'F&G={fg} Fear — slight BUY reduction')
             elif fg >= 80:
                 ctx['block_sell'] = True
                 ctx['reasons'].append(f'F&G={fg} Extreme Greed — no SELL scalps')
 
-            if ctx['vix'] > 30:
-                ctx['conf_adjust'] -= 10
+            if ctx['vix'] > 35:
+                ctx['conf_adjust'] -= 5
                 ctx['reasons'].append(f'VIX={ctx["vix"]:.0f} high fear')
 
             sp = ctx['sp500_chg']
@@ -176,7 +176,7 @@ def get_scalp_context():
                 ctx['block_buy'] = True
                 ctx['reasons'].append(f'S&P {sp:.1f}% — risk-off, no BUY')
             elif sp < -0.8:
-                ctx['conf_adjust'] -= 8
+                ctx['conf_adjust'] -= 4
                 ctx['reasons'].append(f'S&P {sp:.1f}% weak')
             elif sp > 1.0:
                 ctx['conf_adjust'] += 5
@@ -202,13 +202,13 @@ def get_scalp_context():
         bad_count  = sum(1 for k in bad_keywords  if k in recent_titles)
         good_count = sum(1 for k in good_keywords if k in recent_titles)
 
-        if bad_count >= 3:
+        if bad_count >= 4:
             ctx['news_bearish'] = True
             ctx['block_buy']    = True
-            ctx['conf_adjust'] -= 10
+            ctx['conf_adjust'] -= 8
             ctx['reasons'].append(f'News: {bad_count} negative headlines — BUY blocked')
         elif bad_count >= 2:
-            ctx['conf_adjust'] -= 5
+            ctx['conf_adjust'] -= 3
             ctx['reasons'].append(f'News: {bad_count} negative headlines')
 
         if good_count >= 3:
@@ -320,7 +320,7 @@ def run_scalp_cycle():
     # ── Scan for new scalp entries ──────────────────────────────────────────
     open_scalp_pairs = {t['pair'] for t in get_open_trades()
                         if t.get('strategy_reason','').startswith('Scalp')}
-    if len(open_scalp_pairs) >= 2: return  # max 2 scalp positions
+    if len(open_scalp_pairs) >= 3: return  # max 3 scalp positions
 
     for pair in cfg['pairs']:
         if pair in open_scalp_pairs: continue
@@ -341,7 +341,7 @@ def run_scalp_cycle():
 
         # Apply confidence adjustment from macro/news/brain
         adj_conf = max(0, min(100, conf + ctx['conf_adjust']))
-        if adj_conf < 55: continue
+        if adj_conf < 52: continue
 
         # Build enriched reason string
         ctx_summary = ' | '.join(ctx['reasons'][:2]) if ctx['reasons'] else ''
