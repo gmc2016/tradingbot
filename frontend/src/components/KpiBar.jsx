@@ -23,7 +23,7 @@ export default function KpiBar({ stats = {}, openTrades = [], maxPositions = 3 }
     {
       label: 'Open positions',
       value: `${openTrades.length} / ${maxPositions}`,
-      sub:   `${maxPositions - openTrades.length} slot${maxPositions - openTrades.length !== 1 ? 's' : ''} free`,
+      sub:   `${Math.max(0, maxPositions - openTrades.length)} slot${Math.max(0, maxPositions - openTrades.length) !== 1 ? 's' : ''} free`,
       color: openTrades.length >= maxPositions ? 'var(--amber)' : 'var(--text)',
     },
   ]
