@@ -1,345 +1,296 @@
 """
-Trading strategies — 4 strategies + smart market regime filter.
-Key improvement: SELL signals blocked in bull market, BUY blocked in bear market.
-Donchian reserved for liquid coins. MTF for mid-caps.
+Trading strategy — confluence-based with VWAP, MTF, volume, time gates.
+All improvements based on real trading data analysis.
 """
-import pandas as pd
-import ta
 import logging
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# Liquid coins — Donchian works well here (clean breakouts)
-LIQUID_COINS = {'BTC','ETH','BNB','SOL','XRP','ADA','DOGE','AVAX','DOT','MATIC',
-                'LINK','LTC','BCH','ETC','XLM','ATOM','UNI','AAVE','XAU','XAG',
-                'NEAR','ARB','OP','FET','RENDER','COMP','MKR','OKB','CRV'}
+LIQUID_COINS = {
+    'BTC','ETH','BNB','SOL','XRP','ADA','DOGE','AVAX','DOT','MATIC',
+    'LINK','LTC','BCH','ETC','XLM','ATOM','UNI','AAVE','XAU','XAG',
+    'NEAR','ARB','OP','FET','RENDER','COMP','MKR','OKB','CRV','ZEC',
+    'TON','PEPE','NEIRO','STRK','CHIP','KAT','BIO',
+}
 
-def compute_indicators(df):
-    df    = df.copy()
-    close = df['close']
-    high  = df['high']
-    low   = df['low']
+# Sector correlation groups — never hold 2 from same sector
+SECTORS = {
+    'btc':    ['BTC'],
+    'eth':    ['ETH','AAVE','UNI','COMP','MKR','CRV'],
+    'l1':     ['SOL','AVAX','DOT','ATOM','NEAR','TON'],
+    'l2':     ['MATIC','ARB','OP','STRK'],
+    'meme':   ['DOGE','PEPE','NEIRO','SHIB'],
+    'defi':   ['LINK','BNB','OKB'],
+    'other':  ['ZEC','XRP','LTC','XLM','FET','RENDER'],
+}
 
-    df['rsi']         = ta.momentum.RSIIndicator(close, window=14).rsi()
-    macd              = ta.trend.MACD(close, window_slow=26, window_fast=12, window_sign=9)
-    df['macd']        = macd.macd()
-    df['macd_signal'] = macd.macd_signal()
-    bb                = ta.volatility.BollingerBands(close, window=20, window_dev=2)
-    df['bb_upper']    = bb.bollinger_hband()
-    df['bb_lower']    = bb.bollinger_lband()
-    df['bb_mid']      = bb.bollinger_mavg()
-    adx               = ta.trend.ADXIndicator(high, low, close, window=14)
-    df['adx']         = adx.adx()
-    df['ema_9']       = ta.trend.EMAIndicator(close, window=9).ema_indicator()
-    df['ema_21']      = ta.trend.EMAIndicator(close, window=21).ema_indicator()
-    df['ema_50']      = ta.trend.EMAIndicator(close, window=50).ema_indicator()
-    df['ema_200']     = ta.trend.EMAIndicator(close, window=200).ema_indicator()
-    df['atr']         = ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range()
-    df['volume_sma']  = df['volume'].rolling(20).mean()
+_cooldowns = {}
 
-    # Donchian Channel with adaptive lookback
-    try:
-        atr_mean = df['atr'].rolling(50).mean()
-        atr_now  = float(df['atr'].iloc[-1])
-        atr_avg  = float(atr_mean.iloc[-1])
-        ratio    = (atr_now / atr_avg) if (pd.notna(atr_avg) and atr_avg > 0) else 1.0
-        lookback = int(max(10, min(50, round(20 / ratio))))
-    except:
-        lookback = 20
-    df['dc_upper']    = high.rolling(lookback).max()
-    df['dc_lower']    = low.rolling(lookback).min()
-    df['dc_lookback'] = lookback
-
-    return df
-
-def get_market_regime(df):
-    """
-    Detect overall market direction.
-    Returns: 'bull', 'bear', or 'ranging'
-    Used to filter trade direction — no SELL in bull, no BUY in bear.
-    """
-    try:
-        last = df.iloc[-1]
-        e50  = last['ema_50']
-        e200 = last['ema_200']
-        adx  = last['adx'] if pd.notna(last['adx']) else 20
-        rsi  = last['rsi'] if pd.notna(last['rsi']) else 50
-
-        if adx < 18:
-            return 'ranging'
-        if pd.notna(e50) and pd.notna(e200):
-            if e50 > e200 and rsi > 45:
-                return 'bull'
-            if e50 < e200 and rsi < 55:
-                return 'bear'
-        return 'ranging'
-    except:
-        return 'ranging'
-
-def is_liquid_coin(pair):
-    coin = pair.split('/')[0].upper()
-    return coin in LIQUID_COINS
-
-# ── Strategy 1: Donchian Channel Breakout ─────────────────────────────────────
-def signal_donchian(df, sentiment_score=50.0):
-    last = df.iloc[-1]; prev = df.iloc[-2]
-    price = last['close']
-    adx   = last['adx'] if pd.notna(last['adx']) else 0
-    atr   = last['atr']
-    lookback = int(last['dc_lookback']) if pd.notna(last['dc_lookback']) else 20
-
-    if not all(pd.notna(v) for v in [last['dc_upper'], last['dc_lower'], atr]):
-        return 'HOLD', 0, 'Insufficient data', None, None
-    if adx < 20:
-        return 'HOLD', 0, f'ADX {adx:.0f} too low — no trend', None, None
-
-    sl_dist = float(atr) * 1.5
-    tp_dist = float(atr) * 2.5  # 1:2.5 RR — improved from 1:2
-
-    if price > float(prev['dc_upper']) and pd.notna(prev['dc_upper']):
-        sl   = round(price - sl_dist, 8)
-        tp   = round(price + tp_dist, 8)
-        conf = min(95, 55 + int(adx))
-        if sentiment_score >= 60: conf = min(95, conf + 8)
-        return 'BUY', conf, f'Donchian breakout UP (lookback={lookback}, ADX={adx:.0f})', sl, tp
-
-    if price < float(prev['dc_lower']) and pd.notna(prev['dc_lower']):
-        sl   = round(price + sl_dist, 8)
-        tp   = round(price - tp_dist, 8)
-        conf = min(95, 55 + int(adx))
-        if sentiment_score <= 40: conf = min(95, conf + 8)
-        return 'SELL', conf, f'Donchian breakdown DOWN (lookback={lookback}, ADX={adx:.0f})', sl, tp
-
-    return 'HOLD', 0, 'No Donchian breakout', None, None
-
-# ── Strategy 2: RSI + MACD + BB Confluence ────────────────────────────────────
-def signal_confluence(df, sentiment_score=50.0):
-    last = df.iloc[-1]; prev = df.iloc[-2]
-    signals = []
-
-    rsi = last['rsi']
-    if pd.notna(rsi):
-        if   rsi < 30: signals.append(('BUY',  3, f'RSI deeply oversold ({rsi:.0f})'))
-        elif rsi < 40: signals.append(('BUY',  2, f'RSI oversold ({rsi:.0f})'))
-        elif rsi > 70: signals.append(('SELL', 3, f'RSI deeply overbought ({rsi:.0f})'))
-        elif rsi > 60: signals.append(('SELL', 2, f'RSI overbought ({rsi:.0f})'))
-
-    macd=last['macd']; ms=last['macd_signal']
-    pm=prev['macd'];   pms=prev['macd_signal']
-    if all(pd.notna(v) for v in [macd,ms,pm,pms]):
-        if   pm < pms and macd > ms: signals.append(('BUY',  2, 'MACD bull cross'))
-        elif pm > pms and macd < ms: signals.append(('SELL', 2, 'MACD bear cross'))
-        elif macd > ms:              signals.append(('BUY',  1, 'MACD above signal'))
-        else:                        signals.append(('SELL', 1, 'MACD below signal'))
-
-    price=last['close']; bbu=last['bb_upper']; bbl=last['bb_lower']; bbm=last['bb_mid']
-    if pd.notna(bbu) and pd.notna(bbl):
-        if   price < bbl: signals.append(('BUY',  2, 'Below BB lower'))
-        elif price > bbu: signals.append(('SELL', 2, 'Above BB upper'))
-        elif pd.notna(bbm) and price < bbm: signals.append(('BUY', 1, 'Below BB mid'))
-
-    e50=last['ema_50']; e200=last['ema_200']
-    if pd.notna(e50) and pd.notna(e200):
-        signals.append(('BUY', 1, 'EMA uptrend') if e50>e200 else ('SELL', 1, 'EMA downtrend'))
-
-    if   sentiment_score >= 65: signals.append(('BUY',  1, f'Bullish news ({sentiment_score:.0f}%)'))
-    elif sentiment_score <= 35: signals.append(('SELL', 1, f'Bearish news ({sentiment_score:.0f}%)'))
-
-    bs = sum(w for s,w,_ in signals if s=='BUY')
-    ss = sum(w for s,w,_ in signals if s=='SELL')
-    br = [r for s,w,r in signals if s=='BUY']
-    sr = [r for s,w,r in signals if s=='SELL']
-    total = bs + ss
-
-    # Threshold of 4 — proven to work from early trading data
-    if   bs >= 4 and bs > ss: sig='BUY';  conf=min(100,int(bs/total*100)); reason=' + '.join(br[:3])
-    elif ss >= 4 and ss > bs: sig='SELL'; conf=min(100,int(ss/total*100)); reason=' + '.join(sr[:3])
-    else:                     sig='HOLD'; conf=0; reason=f'Mixed signals (B:{bs} S:{ss})'
-
-    atr = last['atr']
-    if sig != 'HOLD' and pd.notna(atr):
-        price = last['close']
-        # ATR-based SL/TP for confluence too (adaptive to volatility)
-        sl_mult = 1.5; tp_mult = 2.5
-        sl = round(price-(float(atr)*sl_mult),8) if sig=='BUY' else round(price+(float(atr)*sl_mult),8)
-        tp = round(price+(float(atr)*tp_mult),8) if sig=='BUY' else round(price-(float(atr)*tp_mult),8)
-    else:
-        sl = tp = None
-
-    return sig, conf, reason, sl, tp
-
-# ── Strategy 3: EMA 9/21 Crossover ───────────────────────────────────────────
-def signal_ema_cross(df, sentiment_score=50.0):
-    last=df.iloc[-1]; prev=df.iloc[-2]
-    e9=last['ema_9']; e21=last['ema_21']
-    pe9=prev['ema_9']; pe21=prev['ema_21']
-    adx=last['adx'] if pd.notna(last['adx']) else 0
-    price=last['close']; atr=last['atr']
-
-    if not all(pd.notna(v) for v in [e9,e21,pe9,pe21,atr]):
-        return 'HOLD', 0, 'Insufficient EMA data', None, None
-    if adx < 22:
-        return 'HOLD', 0, f'EMA: ADX {adx:.0f} too low', None, None
-
-    if pe9 <= pe21 and e9 > e21:
-        conf = min(90, 55 + int(adx))
-        if sentiment_score >= 55: conf = min(90, conf + 8)
-        sl = round(price - float(atr)*1.5, 8)
-        tp = round(price + float(atr)*2.5, 8)
-        return 'BUY', conf, 'EMA 9/21 golden cross', sl, tp
-
-    if pe9 >= pe21 and e9 < e21:
-        conf = min(90, 55 + int(adx))
-        if sentiment_score <= 45: conf = min(90, conf + 8)
-        sl = round(price + float(atr)*1.5, 8)
-        tp = round(price - float(atr)*2.5, 8)
-        return 'SELL', conf, 'EMA 9/21 death cross', sl, tp
-
-    return 'HOLD', 0, 'EMA: no crossover', None, None
-
-# ── Strategy 4: Multi-Timeframe ───────────────────────────────────────────────
-def signal_mtf(df_1h, df_4h, sentiment_score=50.0):
-    if df_4h is None or len(df_4h) < 50:
-        return 'HOLD', 0, 'MTF: no 4h data', None, None
-
-    df_1h = compute_indicators(df_1h)
-    df_4h = compute_indicators(df_4h)
-
-    sig_1h, conf_1h, reason_1h, _, _ = signal_confluence(df_1h, sentiment_score)
-    sig_4h, conf_4h, _,          _, _ = signal_confluence(df_4h, sentiment_score)
-
-    if sig_1h == 'HOLD' or sig_4h == 'HOLD' or sig_1h != sig_4h:
-        return 'HOLD', 0, f'MTF: no agreement (1h={sig_1h} 4h={sig_4h})', None, None
-
-    combined_conf = min(99, int((conf_1h + conf_4h) / 2) + 15)
-    reason = f'MTF confirmed: {reason_1h} [4h agrees]'
-
-    last  = df_1h.iloc[-1]
-    price = last['close']
-    atr   = last['atr']
-    if pd.notna(atr):
-        sl = round(price - float(atr)*1.5, 8) if sig_1h=='BUY' else round(price + float(atr)*1.5, 8)
-        tp = round(price + float(atr)*2.5, 8) if sig_1h=='BUY' else round(price - float(atr)*2.5, 8)
-    else:
-        sl = tp = None
-
-    return sig_1h, combined_conf, reason, sl, tp
-
-# ── Cooldown tracker ──────────────────────────────────────────────────────────
-_cooldown = {}
-
-def set_cooldown(pair, minutes=60):
-    from datetime import datetime, timedelta
-    _cooldown[pair] = datetime.utcnow() + timedelta(minutes=minutes)
+def set_cooldown(pair, minutes):
+    from datetime import timedelta
+    _cooldowns[pair] = datetime.now(timezone.utc) + timedelta(minutes=minutes)
 
 def is_in_cooldown(pair):
-    from datetime import datetime
-    if pair not in _cooldown: return False
-    if datetime.utcnow() > _cooldown[pair]:
-        del _cooldown[pair]; return False
+    if pair not in _cooldowns: return False
+    if datetime.now(timezone.utc) < _cooldowns[pair]: return True
+    del _cooldowns[pair]; return False
+
+def is_liquid_coin(pair):
+    return pair.split('/')[0].upper() in LIQUID_COINS
+
+def is_trade_hours():
+    """Block trading 00:00-06:00 UTC — low liquidity, false signals."""
+    hour = datetime.now(timezone.utc).hour
+    return hour >= 6  # only trade 06:00-24:00 UTC
+
+def get_coin_sector(pair):
+    coin = pair.split('/')[0].upper()
+    for sector, coins in SECTORS.items():
+        if coin in coins: return sector
+    return 'other'
+
+def check_sector_correlation(pair, open_trades):
+    """Return True if safe to trade (no correlated position already open)."""
+    sector = get_coin_sector(pair)
+    if sector == 'other': return True
+    for t in open_trades:
+        if t.get('status') == 'open' and get_coin_sector(t['pair']) == sector:
+            return False
     return True
 
-# ── Main dispatcher ───────────────────────────────────────────────────────────
-def generate_signal(df, sentiment_score=50.0, strategy='combined', df_4h=None, pair=''):
-    if len(df) < 50:
-        return {'signal':'HOLD','confidence':0,'reason':'Insufficient data',
-                'indicators':{},'sl_price':None,'tp_price':None}
+def calculate_vwap(df):
+    """Calculate VWAP — volume weighted average price."""
+    try:
+        typical = (df['high'] + df['low'] + df['close']) / 3
+        vwap = (typical * df['volume']).cumsum() / df['volume'].cumsum()
+        return vwap
+    except:
+        return None
 
-    df   = compute_indicators(df)
-    if len(df) < 2:
-        return {'signal':'HOLD','confidence':0,'reason':'Not enough rows',
-                'indicators':{},'sl_price':None,'tp_price':None}
+def calculate_support_resistance(df, lookback=20):
+    """Find recent support and resistance levels."""
+    try:
+        highs = df['high'].tail(lookback)
+        lows  = df['low'].tail(lookback)
+        resistance = highs.max()
+        support    = lows.min()
+        # Recent pivot points
+        pivot_high = highs.nlargest(3).mean()
+        pivot_low  = lows.nsmallest(3).mean()
+        return support, resistance, pivot_low, pivot_high
+    except:
+        return None, None, None, None
 
-    last   = df.iloc[-1]
-    rsi    = last['rsi']
-    adx    = last['adx'] if pd.notna(last['adx']) else 0
-    e50    = last['ema_50']; e200 = last['ema_200']
-    regime = get_market_regime(df)
-    liquid = is_liquid_coin(pair)
+def generate_signal(df, sentiment_score=50, strategy='combined',
+                    df_4h=None, df_15m=None, pair=None, open_trades=None):
+    """
+    Generate trading signal with full confluence filtering.
+    Requires multiple confirmations to reduce false signals.
+    """
+    if df is None or len(df) < 50:
+        return {'signal':'HOLD','confidence':0,'reason':'Insufficient data','indicators':{}}
 
-    # Smart strategy routing based on coin type
-    if strategy == 'combined':
-        if liquid:
-            # Liquid coins: try Donchian first, fall back to confluence
-            results = [
-                ('donchian',   signal_donchian(df, sentiment_score)),
-                ('confluence', signal_confluence(df, sentiment_score)),
-            ]
-            if df_4h is not None:
-                results.append(('mtf', signal_mtf(df, df_4h, sentiment_score)))
-        else:
-            # Small alts: use confluence + MTF only (Donchian gets too many false breakouts)
-            results = [('confluence', signal_confluence(df, sentiment_score))]
-            if df_4h is not None:
-                results.append(('mtf', signal_mtf(df, df_4h, sentiment_score)))
-    elif strategy == 'donchian':
-        results = [('donchian', signal_donchian(df, sentiment_score))]
-    elif strategy == 'confluence':
-        results = [('confluence', signal_confluence(df, sentiment_score))]
-    elif strategy == 'ema_cross':
-        results = [('ema_cross', signal_ema_cross(df, sentiment_score))]
-    elif strategy == 'mtf':
-        results = [('mtf', signal_mtf(df, df_4h, sentiment_score))]
+    try:
+        import ta
+    except ImportError:
+        return {'signal':'HOLD','confidence':0,'reason':'ta library missing','indicators':{}}
+
+    close  = df['close']
+    high   = df['high']
+    low    = df['low']
+    volume = df['volume']
+    price  = float(close.iloc[-1])
+
+    # ── Time gate — no trading 00:00-06:00 UTC ────────────────────────────
+    if not is_trade_hours():
+        return {'signal':'HOLD','confidence':0,
+                'reason':f'No-trade hours (00-06 UTC)',
+                'indicators':{'regime':'time_gate'}}
+
+    # ── Core indicators ───────────────────────────────────────────────────
+    try:
+        rsi = float(ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1])
+    except: rsi = 50.0
+
+    try:
+        macd_obj  = ta.trend.MACD(close, window_slow=26, window_fast=12, window_sign=9)
+        macd_line = float(macd_obj.macd().iloc[-1])
+        macd_sig  = float(macd_obj.macd_signal().iloc[-1])
+        macd_hist = float(macd_obj.macd_diff().iloc[-1])
+        macd_hist_prev = float(macd_obj.macd_diff().iloc[-2])
+        macd_cross_up   = macd_hist > 0 and macd_hist_prev <= 0
+        macd_cross_down = macd_hist < 0 and macd_hist_prev >= 0
+        macd_rising  = macd_hist > macd_hist_prev
+        macd_falling = macd_hist < macd_hist_prev
+    except: macd_line=macd_sig=macd_hist=0; macd_cross_up=macd_cross_down=False; macd_rising=macd_falling=False
+
+    try:
+        bb     = ta.volatility.BollingerBands(close, window=20, window_dev=2)
+        bb_upper = float(bb.bollinger_hband().iloc[-1])
+        bb_lower = float(bb.bollinger_lband().iloc[-1])
+        bb_mid   = float(bb.bollinger_mavg().iloc[-1])
+        bb_width = (bb_upper - bb_lower) / bb_mid if bb_mid else 0
+    except: bb_upper=bb_lower=bb_mid=price; bb_width=0
+
+    try:
+        ema9  = float(ta.trend.EMAIndicator(close, window=9).ema_indicator().iloc[-1])
+        ema21 = float(ta.trend.EMAIndicator(close, window=21).ema_indicator().iloc[-1])
+        ema50 = float(ta.trend.EMAIndicator(close, window=50).ema_indicator().iloc[-1])
+        ema_up   = ema9 > ema21 and price > ema21
+        ema_down = ema9 < ema21 and price < ema21
+    except: ema9=ema21=ema50=price; ema_up=ema_down=False
+
+    try:
+        adx_obj = ta.trend.ADXIndicator(high, low, close, window=14)
+        adx     = float(adx_obj.adx().iloc[-1])
+        di_plus = float(adx_obj.adx_pos().iloc[-1])
+        di_minus= float(adx_obj.adx_neg().iloc[-1])
+    except: adx=15; di_plus=di_minus=15
+
+    # ── VWAP ─────────────────────────────────────────────────────────────
+    vwap = calculate_vwap(df)
+    vwap_val   = float(vwap.iloc[-1]) if vwap is not None else price
+    above_vwap = price > vwap_val * 1.0005
+    below_vwap = price < vwap_val * 0.9995
+    near_vwap  = abs(price - vwap_val) / vwap_val < 0.003  # within 0.3%
+
+    # ── Volume filter ─────────────────────────────────────────────────────
+    vol_avg   = float(volume.tail(20).mean())
+    vol_now   = float(volume.iloc[-1])
+    vol_above = vol_now > vol_avg * 1.1  # 10% above average
+
+    # ── Market regime ─────────────────────────────────────────────────────
+    if adx > 25:
+        regime = 'bull' if di_plus > di_minus else 'bear'
     else:
-        results = [
-            ('donchian',   signal_donchian(df, sentiment_score)),
-            ('confluence', signal_confluence(df, sentiment_score)),
-            ('ema_cross',  signal_ema_cross(df, sentiment_score)),
-        ]
-        if df_4h is not None:
-            results.append(('mtf', signal_mtf(df, df_4h, sentiment_score)))
+        regime = 'ranging'
 
-    # Pick best signal
-    active = [(name, sig, conf, reason, sl, tp)
-              for name, (sig, conf, reason, sl, tp) in results if sig != 'HOLD']
+    # ── 15-minute MTF confirmation ────────────────────────────────────────
+    mtf_bull = mtf_bear = False
+    if df_15m is not None and len(df_15m) >= 30:
+        try:
+            rsi15 = float(ta.momentum.RSIIndicator(df_15m['close'], window=14).rsi().iloc[-1])
+            ema15 = float(ta.trend.EMAIndicator(df_15m['close'], window=9).ema_indicator().iloc[-1])
+            mtf_bull = rsi15 < 50 and df_15m['close'].iloc[-1] > ema15 * 0.999
+            mtf_bear = rsi15 > 50 and df_15m['close'].iloc[-1] < ema15 * 1.001
+        except: pass
 
-    sig = 'HOLD'; conf = 0; reason = 'No strategy fired'; sl = tp = None
+    # ── Confluence scoring ─────────────────────────────────────────────────
+    buy_score  = 0; sell_score = 0
+    buy_reasons = []; sell_reasons = []
 
-    if active:
-        buys  = [r for r in active if r[1] == 'BUY']
-        sells = [r for r in active if r[1] == 'SELL']
+    # RSI
+    if rsi < 30:
+        buy_score += 2; buy_reasons.append(f'RSI deeply oversold ({rsi:.0f})')
+    elif rsi < 40:
+        buy_score += 1; buy_reasons.append(f'RSI oversold ({rsi:.0f})')
+    if rsi > 70:
+        sell_score += 2; sell_reasons.append(f'RSI deeply overbought ({rsi:.0f})')
+    elif rsi > 60:
+        sell_score += 1; sell_reasons.append(f'RSI overbought ({rsi:.0f})')
 
-        if len(buys) >= 2:
-            best   = max(buys, key=lambda x: x[2])
-            sig    = 'BUY'
-            conf   = min(99, best[2] + 10 * (len(buys) - 1))
-            reason = f'[{len(buys)} strategies agree] {best[3]}'
-            sl, tp = best[4], best[5]
-        elif len(sells) >= 2:
-            best   = max(sells, key=lambda x: x[2])
-            sig    = 'SELL'
-            conf   = min(99, best[2] + 10 * (len(sells) - 1))
-            reason = f'[{len(sells)} strategies agree] {best[3]}'
-            sl, tp = best[4], best[5]
+    # MACD
+    if macd_cross_up or (macd_hist > 0 and macd_rising):
+        buy_score += 2 if macd_cross_up else 1
+        buy_reasons.append('MACD bull cross' if macd_cross_up else 'MACD rising')
+    if macd_cross_down or (macd_hist < 0 and macd_falling):
+        sell_score += 2 if macd_cross_down else 1
+        sell_reasons.append('MACD bear cross' if macd_cross_down else 'MACD falling')
+
+    # Bollinger Bands
+    if price <= bb_lower * 1.005:
+        buy_score += 2; buy_reasons.append('Below BB lower')
+    elif price < bb_mid:
+        buy_score += 1; buy_reasons.append('Below BB mid')
+    if price >= bb_upper * 0.995:
+        sell_score += 2; sell_reasons.append('Above BB upper')
+    elif price > bb_mid:
+        sell_score += 1; sell_reasons.append('Above BB mid')
+
+    # EMA trend
+    if ema_up:
+        buy_score += 1; buy_reasons.append('EMA uptrend')
+    if ema_down:
+        sell_score += 1; sell_reasons.append('EMA downtrend')
+
+    # VWAP — key new filter
+    if below_vwap or near_vwap:
+        buy_score += 1; buy_reasons.append(f'Near/below VWAP')
+    if above_vwap or near_vwap:
+        sell_score += 1; sell_reasons.append(f'Near/above VWAP')
+
+    # Volume confirmation
+    if vol_above:
+        if buy_score > sell_score:  buy_score  += 1; buy_reasons.append('Vol confirm')
+        if sell_score > buy_score:  sell_score += 1; sell_reasons.append('Vol confirm')
+
+    # Sentiment
+    if sentiment_score < 40:
+        buy_score += 1; buy_reasons.append(f'Bearish news ({sentiment_score:.0f}%)')
+    elif sentiment_score > 65:
+        sell_score += 1; sell_reasons.append(f'Bullish news ({sentiment_score:.0f}%)')
+
+    # MTF confirmation — bonus points when 15min agrees
+    if mtf_bull and buy_score > sell_score:
+        buy_score += 2; buy_reasons.append('MTF 15m confirms')
+    if mtf_bear and sell_score > buy_score:
+        sell_score += 2; sell_reasons.append('MTF 15m confirms')
+
+    # ── Regime filter — don't fight the trend ────────────────────────────
+    sig = 'HOLD'; conf = 0; reason = ''
+    sl_price = tp_price = None
+
+    total = buy_score + sell_score
+    threshold = 4  # require 4+ for signal
+
+    if buy_score >= threshold and buy_score > sell_score:
+        if regime == 'bear' and adx > 30:
+            sig = 'HOLD'; reason = f'BUY blocked — strong BEAR regime (ADX:{adx:.0f})'
         else:
-            best   = max(active, key=lambda x: x[2])
-            sig, conf, reason, sl, tp = best[1], best[2], best[3], best[4], best[5]
+            sig = 'BUY'
+            conf = min(100, int(buy_score / 10 * 100))
+            reason = ' + '.join(buy_reasons[:4])
+    elif sell_score >= threshold and sell_score > buy_score:
+        if regime == 'bull' and adx > 30:
+            sig = 'HOLD'; reason = f'SELL blocked — strong BULL regime (ADX:{adx:.0f})'
+        else:
+            sig = 'SELL'
+            conf = min(100, int(sell_score / 10 * 100))
+            reason = ' + '.join(sell_reasons[:4])
+    else:
+        reason = f'Mixed signals (B:{buy_score} S:{sell_score} need {threshold})'
 
-    # ── REGIME FILTER — the key improvement ──────────────────────────────────
-    # Don't fight the trend. Only trade in the direction of the market.
-    if sig == 'SELL' and regime == 'bull':
-        reason = f'SELL blocked — market is BULL regime (EMA uptrend). Wait for reversal.'
-        sig = 'HOLD'; conf = 0; sl = tp = None
-    elif sig == 'BUY' and regime == 'bear':
-        reason = f'BUY blocked — market is BEAR regime (EMA downtrend). Wait for reversal.'
-        sig = 'HOLD'; conf = 0; sl = tp = None
+    # ── ATR-based SL/TP ───────────────────────────────────────────────────
+    if sig in ('BUY','SELL'):
+        try:
+            atr = float(ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range().iloc[-1])
+            if sig == 'BUY':
+                sl_price = round(price - atr * 1.5, 8)
+                tp_price = round(price + atr * 2.5, 8)
+            else:
+                sl_price = round(price + atr * 1.5, 8)
+                tp_price = round(price - atr * 2.5, 8)
+        except: pass
 
     return {
         'signal':     sig,
         'confidence': conf,
         'reason':     reason,
-        'sl_price':   sl,
-        'tp_price':   tp,
+        'sl_price':   sl_price,
+        'tp_price':   tp_price,
         'indicators': {
-            'rsi':       round(float(rsi), 1)         if pd.notna(rsi)           else None,
-            'adx':       round(float(adx), 1),
-            'atr':       round(float(last['atr']), 6) if pd.notna(last['atr'])   else None,
-            'regime':    regime,
-            'liquid':    liquid,
-            'dc_upper':  round(float(last['dc_upper']), 6) if pd.notna(last['dc_upper']) else None,
-            'dc_lower':  round(float(last['dc_lower']), 6) if pd.notna(last['dc_lower']) else None,
-            'ema_9':     round(float(last['ema_9']),  4)   if pd.notna(last['ema_9'])    else None,
-            'ema_21':    round(float(last['ema_21']), 4)   if pd.notna(last['ema_21'])   else None,
-            'strategy':  strategy,
+            'rsi':     round(rsi,1),
+            'macd':    round(macd_hist,4),
+            'adx':     round(adx,1),
+            'bb_pos':  'upper' if price>bb_upper else 'lower' if price<bb_lower else 'mid',
+            'regime':  regime,
+            'vwap':    round(vwap_val,4),
+            'vwap_pos':'below' if below_vwap else 'above' if above_vwap else 'near',
+            'volume':  'high' if vol_above else 'normal',
+            'ema_dir': 'up' if ema_up else 'down' if ema_down else 'flat',
+            'mtf':     'bull' if mtf_bull else 'bear' if mtf_bear else 'neutral',
         }
     }
