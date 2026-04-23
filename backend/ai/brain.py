@@ -91,6 +91,7 @@ Rules for day trading (building balance slowly with daily wins):
 - If market trending → use 'donchian' for liquid pairs
 - If a pair has 3+ consecutive losses → add to pairs_to_pause
 - Only suggest adjustments if they differ from current config by MORE than 0.3
+- NEVER change max_positions — user sets this manually, do not override it
 - NEVER suggest stop_loss_pct >2.5 or <0.8
 - NEVER suggest take_profit_pct >6.0 or <1.5
 - NEVER reduce take_profit below stop_loss × 1.5 (minimum 1.5:1 risk/reward)
@@ -144,7 +145,9 @@ def apply_brain_recommendations(result):
         set_setting('strategy_mode', new_strat)
         changes.append(f'strategy→{new_strat}')
 
+    PROTECTED = {'max_positions', 'active_pairs', 'trading_mode', 'bot_running'}
     for k, v in result.get('adjustments',{}).items():
+        if k in PROTECTED: continue  # never let brain change these
         if v and str(v) != get_setting(k):
             try: float(v); set_setting(k, str(v)); changes.append(f'{k}→{v}')
             except: pass
