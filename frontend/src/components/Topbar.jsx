@@ -38,7 +38,6 @@ export default function Topbar({ data, connected, onStart, onStop, onModeChange 
       {/* Smart mode only — scalp removed based on performance data */}
 
       {/* LLM cost */}
-      {!scalp && (
         <div style={{ fontSize:11, color:'var(--text-3)',
           background:'var(--bg-card)', padding:'3px 8px',
           borderRadius:6, flexShrink:0, display:'flex', gap:4 }}>
@@ -46,7 +45,6 @@ export default function Topbar({ data, connected, onStart, onStop, onModeChange 
           <span>{llmToday} calls today</span>
           <span style={{color:'var(--text-2)'}}>≈${llmCost.toFixed(4)}</span>
         </div>
-      )}
 
       {/* Connection status */}
       <div style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0 }}>
