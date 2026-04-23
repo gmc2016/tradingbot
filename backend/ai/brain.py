@@ -135,36 +135,35 @@ Respond JSON only:
         return None
 
 def apply_brain_recommendations(result):
-    if not result or result.get('action') != 'ADJUST': return False
-    from db.database import get_setting, set_setting
+    """
+    Brain is now READ-ONLY — logs analysis but does NOT auto-change settings.
+    Prevents the brain from breaking working configurations.
+    User can read brain recommendations in the AI Brain panel and apply manually.
+    """
+    if not result: return False
+
+    # Only auto-apply cooldowns on pairs with 3+ consecutive losses
+    # Everything else is logged as a recommendation only
     from bot.strategy import set_cooldown
     changes = []
 
-    new_strat = result.get('recommended_strategy')
-    if new_strat and new_strat != get_setting('strategy_mode'):
-        set_setting('strategy_mode', new_strat)
-        changes.append(f'strategy→{new_strat}')
-
-    PROTECTED = {'max_positions', 'active_pairs', 'trading_mode', 'bot_running'}
-    for k, v in result.get('adjustments',{}).items():
-        if k in PROTECTED: continue  # never let brain change these
-        if v and str(v) != get_setting(k):
-            try: float(v); set_setting(k, str(v)); changes.append(f'{k}→{v}')
-            except: pass
-
-    for pair in result.get('pairs_to_pause',[]):
-        set_cooldown(pair, 120); changes.append(f'pause:{pair}')
+    for pair in result.get('pairs_to_pause', []):
+        set_cooldown(pair, 60)
+        changes.append(f'cooldown:{pair}')
 
     log_entry = {
-        'timestamp':  datetime.utcnow().isoformat(),
-        'action':     result.get('action'),
-        'reasoning':  result.get('reasoning'),
-        'market':     result.get('market_condition'),
-        'changes':    changes,
-        'confidence': result.get('confidence',0),
+        'timestamp':     datetime.utcnow().isoformat(),
+        'action':        result.get('action'),
+        'reasoning':     result.get('reasoning'),
+        'market':        result.get('market_condition'),
+        'recommended':   result.get('adjustments', {}),
+        'changes':       changes,
+        'confidence':    result.get('confidence', 0),
+        'auto_applied':  False,  # nothing auto-applied
+        'note':          'Brain is read-only. Apply recommendations manually in Settings.',
     }
     try:
-        from db.database import get_conn
+        from db.database import get_setting, get_conn
         existing = json.loads(get_setting('brain_log') or '[]')
     except: existing = []
     existing.insert(0, log_entry)
@@ -173,11 +172,20 @@ def apply_brain_recommendations(result):
     set_setting('last_brain_run', datetime.utcnow().isoformat())
 
     if changes:
-        logger.info(f'Brain applied: {", ".join(changes)}')
         from db.activitylog import log as alog
-        alog('settings', f'AI Brain changed: {", ".join(changes)}', level='warning',
-             detail={'changes':changes,'reasoning':result.get('reasoning'),
-                     'confidence':result.get('confidence',0)})
+        alog('brain', f'Brain cooldown applied: {", ".join(changes)}',
+             detail={'changes': changes, 'reasoning': result.get('reasoning')})
+
+    # Log the recommendation without applying it
+    from db.activitylog import log as alog
+    action = result.get('action', 'NO_CHANGE')
+    market = result.get('market_condition', '?')
+    alog('brain',
+         f'Brain analysis: {action} | Market:{market} | Confidence:{result.get("confidence",0)}% '
+         f'— Recommendations logged, NOT auto-applied',
+         detail={'action':action,'market':market,
+                 'recommendations':result.get('adjustments',{}),
+                 'reasoning':result.get('reasoning','')})
     return bool(changes)
 
 def get_brain_log():
