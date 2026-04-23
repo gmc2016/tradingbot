@@ -74,10 +74,11 @@ def init_db():
         ('binance_api_secret',os.environ.get('BINANCE_API_SECRET','')),
         ('newsapi_key',       os.environ.get('NEWSAPI_KEY','')),
     ]
-    # Update scalp pairs — remove ETH, keep BTC+SOL only
+    # Update scalp settings to safer defaults
     try:
         c.execute("UPDATE settings SET value='BTC/USDT,SOL/USDT' WHERE key='scalp_pairs'")
         c.execute("UPDATE settings SET value='0.35' WHERE key='scalp_sl_pct'")
+        c.execute("UPDATE settings SET value='50' WHERE key='scalp_pos_size'")
     except: pass
 
     # Remove ENJ from active pairs if present
@@ -92,7 +93,7 @@ def init_db():
     scalp_defaults = [
         ('trading_mode_scalp','false'),('scalp_tp_pct','0.4'),
         ('scalp_sl_pct','0.35'),('scalp_trail_pct','0.2'),
-        ('scalp_pos_size','100'),('scalp_pairs','BTC/USDT,ETH/USDT'),
+        ('scalp_pos_size','50'),('scalp_pairs','BTC/USDT,ETH/USDT'),
         ('demo_fee_rate','0.1'),
     ]
     for k,v in scalp_defaults:
