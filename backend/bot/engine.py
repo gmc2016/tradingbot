@@ -178,7 +178,7 @@ def scan_and_trade():
         logger.info(f'Watchlist promoted {promoted} pair(s) to active')
     check_open_positions()
     open_t=get_open_trades(); open_pairs={t['pair'] for t in open_t}
-    open_cnt=len(open_t)
+    open_cnt=len(open_t)  # counts ALL open trades including scalp
     if open_cnt>=cfg['max_positions']: return
     news=get_news(20)
 
@@ -345,6 +345,8 @@ def start_cache_refresh():
 def get_dashboard_data():
     cfg=get_config(); mode=cfg['mode']
     open_t=get_open_trades(); recent=get_recent_trades(30)
+    # Ensure max_positions reflects ALL open trades including scalp
+    actual_open = len([t for t in open_t if t['status']=='open'])
     for t in recent:
         if t.get('status')=='open':
             cached=next((p for p in _cache['pairs'] if p['symbol']==t['pair']),None)
