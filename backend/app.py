@@ -20,7 +20,6 @@ init_db(); init_auth(); init_activity_log()
 from bot.engine import (scan_and_trade, get_dashboard_data, start_cache_refresh,
                          refresh_pair_cache, open_manual_trade, close_manual_trade)
 from bot.scanner import run_scanner, apply_scanner_results
-from bot.scalp import run_scalp_cycle
 from bot.macro import fetch_all_macro, get_macro_risk_level
 from bot.account import get_full_account_status
 from ai.sentiment import fetch_and_analyze
@@ -214,13 +213,6 @@ def macro_cycle():
         alog('system', msg, level=level, detail=risk)
     except Exception as e: logger.debug(f'Macro cycle: {e}')
 
-def scalp_cycle():
-    try:
-        if _gs('trading_mode_scalp')!='true': return
-        run_scalp_cycle()
-        push()
-    except Exception as e: logger.error(f'Scalp: {e}')
-
 def scanner_cycle():
     try:
         if _gs('scanner_enabled')!='true': return
@@ -247,8 +239,8 @@ scheduler.add_job(bot_cycle,    'interval',minutes=5,  id='bot',    max_instance
 scheduler.add_job(news_cycle,   'interval',minutes=15, id='news',   max_instances=1,misfire_grace_time=120)
 scheduler.add_job(cache_cycle,  'interval',minutes=1,  id='cache',  max_instances=1,misfire_grace_time=90,coalesce=True)
 scheduler.add_job(macro_cycle,  'interval',minutes=15, id='macro',  max_instances=1,misfire_grace_time=60)
-scheduler.add_job(scalp_cycle,  'interval',seconds=30,id='scalp',  max_instances=1,misfire_grace_time=10,coalesce=True)
-scheduler.add_job(scanner_cycle,'interval',hours=6,    id='scanner',max_instances=1,misfire_grace_time=300)
+# Scalp mode removed — smart mode with quality filters is more profitable
+scheduler.add_job(scanner_cycle,'interval',hours=2,    id='scanner',max_instances=1,misfire_grace_time=300)
 scheduler.add_job(brain_cycle,  'interval',minutes=30, id='brain',  max_instances=1,misfire_grace_time=120)
 scheduler.start()
 start_cache_refresh()
