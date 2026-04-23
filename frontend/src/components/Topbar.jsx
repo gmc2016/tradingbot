@@ -1,7 +1,7 @@
 import React from 'react'
 import axios from 'axios'
 
-export default function Topbar({ data, connected, onStart, onStop, onModeChange, scalp, onScalpToggle }) {
+export default function Topbar({ data, connected, onStart, onStop, onModeChange }) {
   const running   = data?.bot_running
   const mode      = data?.mode || 'demo'
   const stats     = data?.stats || {}
@@ -35,31 +35,7 @@ export default function Topbar({ data, connected, onStart, onStop, onModeChange,
         ))}
       </div>
 
-      {/* SMART / SCALP toggle */}
-      <div style={{ display:'flex', gap:2, background:'var(--bg-card)',
-        borderRadius:6, padding:2, flexShrink:0 }}>
-        <button onClick={()=>onScalpToggle(false)} style={{
-          padding:'3px 10px', borderRadius:4, fontSize:11, fontWeight:600,
-          background: !scalp ? 'var(--teal)' : 'transparent',
-          color: !scalp ? '#fff' : 'var(--text-3)',
-          border:'none', cursor:'pointer',
-        }}>🧠 Smart</button>
-        <button onClick={()=>onScalpToggle(true)} style={{
-          padding:'3px 10px', borderRadius:4, fontSize:11, fontWeight:600,
-          background: scalp ? 'var(--amber)' : 'transparent',
-          color: scalp ? '#000' : 'var(--text-3)',
-          border:'none', cursor:'pointer',
-        }}>⚡ Scalp</button>
-      </div>
-
-      {/* Scalp indicator */}
-      {scalp && (
-        <span style={{ fontSize:10, color:'var(--amber)', fontWeight:600,
-          background:'rgba(245,158,11,.15)', padding:'2px 8px', borderRadius:10,
-          flexShrink:0 }}>
-          30s cycles · BTC/ETH · 0.4% target · no AI
-        </span>
-      )}
+      {/* Smart mode only — scalp removed based on performance data */}
 
       {/* LLM cost */}
       {!scalp && (
