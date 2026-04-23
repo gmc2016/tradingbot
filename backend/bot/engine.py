@@ -7,6 +7,7 @@ from db.database import (get_setting, set_setting, insert_trade, close_trade,
                           get_open_trades, get_recent_trades, get_stats, get_news)
 from db.activitylog import log as alog
 from bot.watchlist import check_watchlist_promotions, get_watchlist_data
+from bot.strategy import check_sector_correlation, is_trade_hours
 
 logger       = logging.getLogger(__name__)
 
@@ -189,13 +190,12 @@ def scan_and_trade():
         df_1h=fetch_ohlcv(pair,timeframe='1h',limit=300)
         if df_1h is None or len(df_1h)<50: continue
 
-        df_4h=None
-        if cfg['mtf_enabled']:
-            df_4h=fetch_ohlcv(pair,timeframe='4h',limit=150)
+        # Fetch 15m candles for MTF confirmation
+        df_15m=fetch_ohlcv(pair,timeframe='15m',limit=100)
 
         sent  =get_pair_sentiment(pair)
         result=generate_signal(df_1h,sentiment_score=sent,strategy=cfg['strategy'],
-                               df_4h=df_4h,pair=pair)
+                               df_15m=df_15m,pair=pair,open_trades=get_open_trades())
         sig=result['signal']; conf=result['confidence']
         reason=result['reason']; indic=result.get('indicators',{})
         sl_price=result.get('sl_price'); tp_price=result.get('tp_price')
@@ -205,6 +205,11 @@ def scan_and_trade():
                      'reason':reason,'sentiment':round(sent,1)})
 
         if sig in ('BUY','SELL') and conf>=55:
+            # Correlation filter — no 2 positions from same sector
+            if not check_sector_correlation(pair, get_open_trades()):
+                alog('signal', f'{pair}: blocked — correlated position already open',
+                     detail={'pair':pair,'signal':sig})
+                continue
             # Apply macro filters
             try:
                 from bot.macro import fetch_all_macro, get_macro_risk_level
@@ -312,8 +317,11 @@ def refresh_pair_cache():
             sent=get_pair_sentiment(pair)
             res={'signal':'HOLD','confidence':0,'reason':'Loading...','indicators':{}}
             if df_1h is not None and len(df_1h)>=50:
+                df_15m_c=fetch_ohlcv(pair,timeframe='15m',limit=60)
                 res=generate_signal(df_1h,sentiment_score=sent,
-                                    strategy=cfg['strategy'],df_4h=df_4h,pair=pair)
+                                    strategy=cfg['strategy'],
+                                    df_15m=df_15m_c,pair=pair,
+                                    open_trades=get_open_trades())
             pair_data.append({
                 'symbol':pair,'price':price,'change':round(change,2),
                 'signal':res['signal'],'confidence':res['confidence'],
