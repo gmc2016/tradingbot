@@ -30,7 +30,7 @@ def init_db():
         ('max_positions','5'), ('stop_loss_pct','1.5'), ('take_profit_pct','3.0'),
         ('position_size_usdt','100'),
         ('trading_mode', os.environ.get('TRADING_MODE','demo')),
-        ('active_pairs','BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT'),
+        ('active_pairs','BNB/USDT,SOL/USDT,XRP/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT,PEPE/USDT,NEIRO/USDT,MATIC/USDT'),
         ('bot_running','false'), ('starting_balance','1000'),
         ('trailing_stop_enabled','true'), ('trailing_stop_pct','0.8'),
         ('partial_close_enabled','true'), ('partial_close_at_pct','0.8'),
@@ -76,18 +76,12 @@ def init_db():
     ]
     # Update scalp settings to safer defaults
     try:
-        c.execute("UPDATE settings SET value='BTC/USDT,SOL/USDT' WHERE key='scalp_pairs'")
+        c.execute("UPDATE settings SET value='SOL/USDT' WHERE key='scalp_pairs'")
         c.execute("UPDATE settings SET value='0.35' WHERE key='scalp_sl_pct'")
         c.execute("UPDATE settings SET value='50' WHERE key='scalp_pos_size'")
     except: pass
 
-    # Remove ENJ from active pairs if present
-    try:
-        cur_pairs = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
-        if cur_pairs and 'ENJ/USDT' in cur_pairs[0]:
-            new_pairs = ','.join(p for p in cur_pairs[0].split(',') if 'ENJ' not in p)
-            c.execute("UPDATE settings SET value=? WHERE key='active_pairs'", (new_pairs,))
-    except: pass
+
 
     # Add scalp settings if missing
     scalp_defaults = [
@@ -98,6 +92,37 @@ def init_db():
     ]
     for k,v in scalp_defaults:
         c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,v))
+
+    # Remove consistent losers: LINK, ENJ, BTC, ETH from active pairs
+    try:
+        cur_pairs = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
+        if cur_pairs:
+            remove = {'LINK/USDT','ENJ/USDT'}
+            pairs = [p.strip() for p in cur_pairs[0].split(',')
+                     if p.strip() and p.strip() not in remove]
+            if pairs:
+                c.execute("UPDATE settings SET value=? WHERE key='active_pairs'", (','.join(pairs),))
+    except: pass
+
+    # Remove consistent losers: LINK, ENJ, BTC, ETH from active pairs
+    try:
+        cur_pairs = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
+        if cur_pairs:
+            pairs = [p.strip() for p in cur_pairs[0].split(',')
+                     if 'LINK' not in p and 'ENJ' not in p and p.strip()]
+            if pairs:
+                c.execute("UPDATE settings SET value=? WHERE key='active_pairs'", (','.join(pairs),))
+    except: pass
+
+    # Reset SL/TP if brain set them too tight
+    try:
+        cur_sl = c.execute("SELECT value FROM settings WHERE key='stop_loss_pct'").fetchone()
+        if cur_sl and float(cur_sl[0]) < 1.2:
+            c.execute("UPDATE settings SET value='1.5' WHERE key='stop_loss_pct'")
+        cur_tp = c.execute("SELECT value FROM settings WHERE key='take_profit_pct'").fetchone()
+        if cur_tp and float(cur_tp[0]) < 2.0:
+            c.execute("UPDATE settings SET value='2.5' WHERE key='take_profit_pct'")
+    except: pass
 
     # Ensure trailing stop pct is at good default (brain may have changed it)
     try:
