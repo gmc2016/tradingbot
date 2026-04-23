@@ -9,7 +9,8 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-SCALP_PAIRS   = ['BTC/USDT', 'SOL/USDT']
+SCALP_PAIRS     = ['BTC/USDT', 'SOL/USDT']
+SCALP_POS_SIZE  = 50  # $50 per scalp — half risk vs smart mode
 SCALP_TP_PCT  = 0.004   # 0.4%
 SCALP_SL_PCT  = 0.0035  # 0.35% — wider to avoid noise stop-outs
 SCALP_TRAIL   = 0.002   # 0.2% trailing
@@ -25,10 +26,39 @@ def get_scalp_config():
         'pairs':     (get_setting('scalp_pairs') or 'BTC/USDT,ETH/USDT').split(','),
     }
 
+def get_hourly_trend(pair):
+    """
+    Check 1-hour EMA trend to avoid fighting the trend on scalps.
+    Returns: 'up', 'down', or 'neutral'
+    """
+    try:
+        from bot.exchange import fetch_ohlcv
+        df_1h = fetch_ohlcv(pair, timeframe='1h', limit=50)
+        if df_1h is None or len(df_1h) < 20:
+            return 'neutral'
+        import ta
+        close = df_1h['close']
+        ema20 = ta.trend.EMAIndicator(close, window=20).ema_indicator()
+        ema50 = ta.trend.EMAIndicator(close, window=50).ema_indicator()
+        last_price = close.iloc[-1]
+        e20 = ema20.iloc[-1]
+        e50 = ema50.iloc[-1]
+        # Strong uptrend: price > EMA20 > EMA50
+        if last_price > e20 > e50 and last_price > e20 * 1.002:
+            return 'up'
+        # Strong downtrend: price < EMA20 < EMA50
+        elif last_price < e20 < e50 and last_price < e20 * 0.998:
+            return 'down'
+        return 'neutral'
+    except:
+        return 'neutral'
+
+
 def calculate_scalp_signal(df, pair):
     """
     Pure technical scalp signal on 5-min candles.
     Fires on: RSI momentum + BB squeeze + volume confirmation.
+    Trend-aware: only trades in direction of 1h EMA trend.
     Returns: signal ('BUY'|'SELL'|'HOLD'), confidence, reason
     """
     import pandas as pd
@@ -41,6 +71,9 @@ def calculate_scalp_signal(df, pair):
     high   = df['high']
     low    = df['low']
     volume = df['volume']
+
+    # Get hourly trend — only trade in trend direction
+    trend = get_hourly_trend(pair)
 
     # RSI (14)
     rsi = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
@@ -105,11 +138,21 @@ def calculate_scalp_signal(df, pair):
     if total == 0: return 'HOLD', 0, 'No signal'
 
     if score_buy >= 4 and score_buy > score_sell:
+        # Trend filter: block BUY if strong downtrend
+        if trend == 'down':
+            return 'HOLD', 0, f'BUY blocked — 1h downtrend (score:{score_buy})'
         conf = min(95, int(score_buy / 7 * 100))
-        return 'BUY', conf, ' + '.join(reasons_b[:3])
+        # Trend boost: higher confidence when trading with trend
+        if trend == 'up': conf = min(95, conf + 8)
+        return 'BUY', conf, f'{"↑Trend " if trend=="up" else ""}' + ' + '.join(reasons_b[:3])
     elif score_sell >= 4 and score_sell > score_buy:
+        # Trend filter: block SELL if strong uptrend
+        if trend == 'up':
+            return 'HOLD', 0, f'SELL blocked — 1h uptrend (score:{score_sell})'
         conf = min(95, int(score_sell / 7 * 100))
-        return 'SELL', conf, ' + '.join(reasons_s[:3])
+        # Trend boost: higher confidence when trading with trend
+        if trend == 'down': conf = min(95, conf + 8)
+        return 'SELL', conf, f'{"↓Trend " if trend=="down" else ""}' + ' + '.join(reasons_s[:3])
 
     return 'HOLD', 0, f'Mixed (B:{score_buy} S:{score_sell} need 4)'
 
