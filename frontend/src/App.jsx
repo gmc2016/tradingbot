@@ -22,20 +22,7 @@ import MacroPanel    from './components/MacroPanel'
 
 function Dashboard({ auth, logout }) {
   const { data, connected, prices, startBot, stopBot, setMode, runNow, refreshNews, updateSettings } = useDashboard()
-  const [scalp, setScalp] = useState(false)
-
-  // Sync scalp state from backend on load and on data changes
-  useEffect(() => {
-    const backendScalp = data?.config?.trading_mode_scalp === 'true' ||
-                         data?.config?.trading_mode_scalp === true
-    setScalp(backendScalp)
-  }, [data?.config?.trading_mode_scalp])
-
-  const toggleScalp = async (val) => {
-    setScalp(val)
-    await axios.post('/api/settings',{trading_mode_scalp: val ? 'true' : 'false'},{withCredentials:true})
-    runNow()
-  }
+  // Smart mode only — scalp removed based on performance analysis
   const [selectedPair,  setSelectedPair]  = useState('BTC/USDT')
   const [showSettings,  setShowSettings]  = useState(false)
   const [showHistory,   setShowHistory]   = useState(false)
@@ -91,7 +78,7 @@ function Dashboard({ auth, logout }) {
 
   return (
     <div style={{display:'flex',flexDirection:'column',height:'100vh',overflow:'hidden'}}>
-      <Topbar data={{...data,pairs}} connected={connected} onStart={startBot} onStop={stopBot} onModeChange={handleModeChange} scalp={scalp} onScalpToggle={toggleScalp}/>
+      <Topbar data={{...data,pairs}} connected={connected} onStart={startBot} onStop={stopBot} onModeChange={handleModeChange}/>
 
       <div style={{background:'var(--bg-surface)',borderBottom:'1px solid var(--border)',padding:'4px 12px',display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
         {actionBtns.map(([label,fn])=>(
