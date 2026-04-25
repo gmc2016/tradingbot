@@ -150,7 +150,10 @@ def check_open_positions():
             fee      = (entry * qty * fee_rate) + (cp * qty * fee_rate)
             pnl_after_fee = pnl - fee
             close_trade(t['id'],cp,pnl_after_fee)
-            if mode=='demo': adj_demo(pnl_after_fee + cfg['position_size_usdt'])
+            if mode=='demo':
+                # Restore actual cost (entry * qty) + net PnL after fees
+                actual_cost = round(entry * qty, 4)
+                adj_demo(actual_cost + pnl_after_fee)
             closed_by = 'TP' if ((side=='BUY' and cp>=tp) or (side=='SELL' and cp<=tp)) else 'SL'
             # With trailing: closing at "TP" often means trailing stop triggered = profit locked
             level = 'success' if pnl>=0 else 'warning'
@@ -299,7 +302,9 @@ def close_manual_trade(trade_id):
     pnl=(cp-t['entry_price'])*t['quantity'] if t['side']=='BUY' else (t['entry_price']-cp)*t['quantity']
     place_market_order(t['pair'],'SELL' if t['side']=='BUY' else 'BUY',t['quantity'],mode=t['mode'])
     close_trade(trade_id,cp,pnl)
-    if t['mode']=='demo': adj_demo(pnl)
+    if t['mode']=='demo':
+        actual_cost = round(t['entry_price'] * t['quantity'], 4)
+        adj_demo(actual_cost + pnl)
     alog('trade',f"FORCE CLOSED {t['pair']} PnL:{pnl:+.2f}",
          level='success' if pnl>=0 else 'warning',
          detail={'pair':t['pair'],'pnl':round(pnl,4),'exit_price':cp})
