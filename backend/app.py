@@ -586,6 +586,33 @@ def reset_demo():
         return jsonify({'ok':True,'deleted_trades':deleted,'new_balance':starting})
     except Exception as e: return jsonify({'error':str(e)}),500
 
+@app.route('/api/demo/fix_balance',methods=['POST'])
+@login_required
+def fix_demo_balance():
+    """Recalculate demo balance from trade history to fix phantom balance bug."""
+    try:
+        from db.database import get_conn, get_setting
+        from bot.engine import _demo, get_config
+        conn=get_conn()
+        starting = float(get_setting('starting_balance') or 1000)
+        # Sum up: starting - all open trade costs + all closed trade (cost + pnl)
+        open_trades  = conn.execute("SELECT entry_price,quantity FROM trades WHERE status='open' AND mode='demo'").fetchall()
+        closed_trades= conn.execute("SELECT entry_price,quantity,pnl FROM trades WHERE status='closed' AND mode='demo'").fetchall()
+        conn.close()
+        balance = starting
+        for t in open_trades:
+            balance -= round(t[0]*t[1], 4)  # deduct open position cost
+        for t in closed_trades:
+            balance -= round(t[0]*t[1], 4)  # deduct original cost
+            balance += round(t[0]*t[1], 4)  # restore cost on close
+            balance += float(t[2] or 0)     # add PnL
+        _demo['balance'] = round(balance, 2)
+        _demo['init'] = True
+        alog('system', f'Demo balance recalculated: ${_demo["balance"]:.2f} (was phantom inflated)')
+        push()
+        return jsonify({'ok':True,'new_balance':_demo['balance']})
+    except Exception as e: return jsonify({'error':str(e)}),500
+
 # ── Export (with date range) ───────────────────────────────────────────────────
 @app.route('/api/export/trades')
 @login_required
