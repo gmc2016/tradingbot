@@ -7,6 +7,8 @@ from db.database import (get_setting, set_setting, insert_trade, close_trade,
                           get_open_trades, get_recent_trades, get_stats, get_news)
 from db.activitylog import log as alog
 from bot.watchlist import check_watchlist_promotions, get_watchlist_data
+from bot.performance import (check_capital_protection, get_compounded_position_size,
+                              auto_flag_poor_performers)
 from bot.strategy import check_sector_correlation, is_trade_hours
 
 logger       = logging.getLogger(__name__)
@@ -174,8 +176,15 @@ def check_open_positions():
 
 def scan_and_trade():
     if _s('bot_running','false')!='true': return
+    # Capital protection — pause if drawdown too large
+    if not check_capital_protection(): return
     cfg=get_config(); mode=cfg['mode']
     alog('system',f"Scan cycle — mode:{mode} strategy:{cfg['strategy']} pairs:{len(get_pairs_list())}")
+    # Auto-flag poor performing pairs for removal
+    newly_flagged = auto_flag_poor_performers()
+    if newly_flagged:
+        logger.info(f'Auto-flagged and removed: {newly_flagged}')
+
     # Check watchlist for auto-promotion opportunities
     promoted = check_watchlist_promotions()
     if promoted > 0:
@@ -189,6 +198,10 @@ def scan_and_trade():
     for pair in get_pairs_list():
         if pair in open_pairs or open_cnt>=cfg['max_positions']: continue
         if is_in_cooldown(pair): continue
+        # Skip flagged poor performers
+        from db.database import get_setting as _gs2
+        flagged = [p.strip() for p in (_gs2('flagged_pairs') or '').split(',')]
+        if pair in flagged: continue
 
         df_1h=fetch_ohlcv(pair,timeframe='1h',limit=300)
         if df_1h is None or len(df_1h)<50: continue
@@ -229,7 +242,7 @@ def scan_and_trade():
 
             ticker=fetch_ticker(pair)
             if not ticker: continue
-            price=ticker['last']; pos=cfg['position_size_usdt']
+            price=ticker['last']; pos=get_compounded_position_size()
             avail=get_demo_balance() if mode=='demo' else get_balance().get('USDT',0)
             if avail<pos: logger.warning(f'Low balance:{avail:.2f}'); continue
 
