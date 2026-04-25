@@ -9,7 +9,7 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
     starting_balance:'1000', strategy_mode:'combined',
     trailing_stop_enabled:'true', trailing_stop_pct:'0.8',
     partial_close_enabled:'true', partial_close_at_pct:'1.5', partial_close_size_pct:'50',
-    max_loss_streak:'3', cooldown_minutes:'60',
+    max_loss_streak:'3', cooldown_minutes:'60', capital_floor_pct:'8', compounding_enabled:'false',
     binance_api_key:'', binance_api_secret:'', newsapi_key:'', anthropic_api_key:'',
     scanner_enabled:'true', scanner_auto_update:'true', scanner_top_n:'8', pinned_pairs:'BTC/USDT,ETH/USDT',
   })
@@ -34,6 +34,8 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
         use_llm_filter:          s.use_llm_filter         || 'false',
         mtf_enabled:             s.mtf_enabled            || 'false',
         max_loss_streak:         s.max_loss_streak        || prev.max_loss_streak,
+        capital_floor_pct:       s.capital_floor_pct      || prev.capital_floor_pct,
+        compounding_enabled:     s.compounding_enabled    || prev.compounding_enabled,
         cooldown_minutes:        s.cooldown_minutes       || prev.cooldown_minutes,
         // Risk
         stop_loss_pct:           s.stop_loss_pct          || prev.stop_loss_pct,
@@ -163,6 +165,18 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
               Inspired by the article: after N consecutive losing trades on the same pair, the bot pauses trading that pair for a cooldown period. Prevents chasing losses.
             </InfoBox>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <Field label="Capital floor %" hint="Pause bot if balance drops this % below starting (protects capital)">
+                <input type="number" step="1" min="2" max="25" value={f.capital_floor_pct||'8'} onChange={e=>set('capital_floor_pct',e.target.value)}/>
+                <div style={{fontSize:11,color:'var(--text-3)',marginTop:4}}>e.g. 8 = pause if $1000 drops to $920</div>
+              </Field>
+              <Field label="Semi-compounding" hint="Position size grows with balance">
+                <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
+                  <input type="checkbox" checked={f.compounding_enabled==='true'}
+                    onChange={e=>set('compounding_enabled',e.target.checked?'true':'false')}/>
+                  <span style={{fontSize:12}}>Grow positions with profits</span>
+                </label>
+                <div style={{fontSize:11,color:'var(--text-3)',marginTop:4}}>Only increases, never decreases. Max 2x base size.</div>
+              </Field>
               <Field label="Max consecutive losses" hint="Then pause pair">
                 <input type="number" step="1" min="1" max="10" value={f.max_loss_streak} onChange={e=>set('max_loss_streak',e.target.value)}/>
                 <div style={{fontSize:11,color:'var(--text-3)',marginTop:4}}>e.g. 3 = after 3 losses in a row on BTC/USDT, pause BTC/USDT trading</div>
