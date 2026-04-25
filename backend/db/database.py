@@ -43,6 +43,9 @@ def init_db():
         ('last_scan_at',''), ('last_scan_result',''),
         ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
         ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
+        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT'),
+        ('capital_floor_pct','8'),
+        ('compounding_enabled','false'),
         ('trading_mode_scalp','false'),
         ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
         ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
@@ -64,6 +67,9 @@ def init_db():
         ('partial_close_enabled','true'), ('partial_close_at_pct','0.8'), ('max_positions','5'),
         ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
         ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
+        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT'),
+        ('capital_floor_pct','8'),
+        ('compounding_enabled','false'),
         ('trading_mode_scalp','false'),
         ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
         ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
@@ -82,6 +88,15 @@ def init_db():
     except: pass
 
 
+
+    # Add performance/protection settings if missing
+    perf_defaults = [
+        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT'),
+        ('capital_floor_pct','8'),
+        ('compounding_enabled','false'),
+    ]
+    for k,v in perf_defaults:
+        c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,v))
 
     # Add scalp settings if missing
     scalp_defaults = [
