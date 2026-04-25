@@ -240,7 +240,7 @@ scheduler.add_job(news_cycle,   'interval',minutes=15, id='news',   max_instance
 scheduler.add_job(cache_cycle,  'interval',minutes=1,  id='cache',  max_instances=1,misfire_grace_time=90,coalesce=True)
 scheduler.add_job(macro_cycle,  'interval',minutes=15, id='macro',  max_instances=1,misfire_grace_time=60)
 # Scalp mode removed — smart mode with quality filters is more profitable
-scheduler.add_job(scanner_cycle,'interval',hours=2,    id='scanner',max_instances=1,misfire_grace_time=300)
+scheduler.add_job(scanner_cycle,'interval',hours=1,    id='scanner',max_instances=1,misfire_grace_time=300)
 scheduler.add_job(brain_cycle,  'interval',minutes=30, id='brain',  max_instances=1,misfire_grace_time=120)
 scheduler.start()
 start_cache_refresh()
@@ -337,7 +337,8 @@ def get_settings():
           'use_llm_filter','mtf_enabled',
           'scanner_enabled','scanner_interval_hours','scanner_auto_update',
           'scanner_top_n','pinned_pairs','ai_brain_enabled',
-          'scalp_tp_pct','scalp_sl_pct','scalp_trail_pct','scalp_pos_size','scalp_pairs']
+          'scalp_tp_pct','scalp_sl_pct','scalp_trail_pct','scalp_pos_size','scalp_pairs',
+          'capital_floor_pct','compounding_enabled']
     data={k:_gs(k) for k in keys}
     data['watchlist'] = get_setting('watchlist') or 'BTC/USDT,ETH/USDT'
     data['binance_api_key']   ='***' if get_setting('binance_api_key')    else ''
@@ -585,6 +586,26 @@ def reset_demo():
         push()
         return jsonify({'ok':True,'deleted_trades':deleted,'new_balance':starting})
     except Exception as e: return jsonify({'error':str(e)}),500
+
+@app.route('/api/performance')
+@login_required
+def performance():
+    from bot.performance import get_performance_summary
+    try: return jsonify(get_performance_summary())
+    except Exception as e: return jsonify({'error':str(e)}),500
+
+@app.route('/api/performance/unflag',methods=['POST'])
+@login_required
+def unflag_pair():
+    """Manually un-flag a pair to re-enable trading it."""
+    pair = (request.json or {}).get('pair','')
+    if not pair: return jsonify({'error':'No pair'}),400
+    flagged = [p.strip() for p in (get_setting('flagged_pairs') or '').split(',') if p.strip()]
+    flagged = [p for p in flagged if p != pair]
+    from db.database import set_setting
+    set_setting('flagged_pairs', ','.join(flagged))
+    alog('settings', f'Un-flagged {pair} — re-enabled for trading')
+    return jsonify({'ok':True,'flagged':flagged})
 
 @app.route('/api/demo/fix_balance',methods=['POST'])
 @login_required
