@@ -19,6 +19,7 @@ import ActivityLog   from './components/ActivityLog'
 import TickerStrip   from './components/TickerStrip'
 import WatchlistPanel from './components/WatchlistPanel'
 import MacroPanel    from './components/MacroPanel'
+import PerformanceWidget from './components/PerformanceWidget'
 
 function Dashboard({ auth, logout }) {
   const { data, connected, prices, startBot, stopBot, setMode, runNow, refreshNews, updateSettings } = useDashboard()
@@ -114,6 +115,7 @@ function Dashboard({ auth, logout }) {
           <ChartPanel symbol={selectedPair} trades={recent_trades}/>
           <TradesTable trades={recent_trades} mode={mode}/>
           <MacroPanel expanded={showMacro} onToggle={()=>setShowMacro(v=>!v)}/>
+          <PerformanceWidget/>
         </div>
         <RightPanel openTrades={open_trades} pairs={pairs} news={news} config={config} prices={prices}/>
       </div>
