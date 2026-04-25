@@ -66,7 +66,7 @@ def fetch_all_usdt_tickers():
             high  = t.get('high', price) or price
             low   = t.get('low',  price) or price
             chg   = t.get('percentage', 0) or 0
-            if vol < 20_000_000: continue  # Min $20M daily volume for quality
+            if vol < 15_000_000: continue  # Min $15M daily volume (expanded universe)
             if price <= 0: continue
             # Intraday range % — proxy for volatility without needing OHLCV
             range_pct = ((high - low) / low * 100) if low > 0 else 0
