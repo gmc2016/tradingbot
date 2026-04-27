@@ -362,13 +362,19 @@ def generate_signal(df, sentiment_score=50, strategy='combined',
     if sig in ('BUY','SELL'):
         try:
             atr = float(ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range().iloc[-1])
+            # Cap ATR at 5% of price to prevent huge stops on volatile/micro coins
+            max_sl_dist = price * 0.05
+            atr_capped  = min(atr, max_sl_dist / 1.5)
             if sig == 'BUY':
-                # SL just below SuperTrend line (or ATR-based)
-                sl_price = round(max(st_val * 0.998, price - atr * 1.5), 8) if st_val else round(price - atr * 1.5, 8)
-                tp_price = round(price + atr * 2.5, 8)
+                sl_raw   = price - atr_capped * 1.5
+                sl_price = round(max(sl_raw, price * 0.95), 8)  # never more than 5% below
+                tp_price = round(price + atr_capped * 2.5, 8)
+                if st_val and st_val < price: sl_price = round(max(sl_price, st_val * 0.998), 8)
             else:
-                sl_price = round(min(st_val * 1.002, price + atr * 1.5), 8) if st_val else round(price + atr * 1.5, 8)
-                tp_price = round(price - atr * 2.5, 8)
+                sl_raw   = price + atr_capped * 1.5
+                sl_price = round(min(sl_raw, price * 1.05), 8)  # never more than 5% above
+                tp_price = round(price - atr_capped * 2.5, 8)
+                if st_val and st_val > price: sl_price = round(min(sl_price, st_val * 1.002), 8)
         except: pass
 
     return {
