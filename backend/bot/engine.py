@@ -22,7 +22,7 @@ def get_macro_data(*a, **kw):
         return m
     except: return {'signals': {}}
 _demo        = {'balance':1000.0,'init':False}
-_cache       = {'pairs':[],'sentiments':{},'last_update':None}
+_cache       = {'pairs':[],'sentiments':{},'last_update':None,'orderbooks':{}}
 _loss_streak = {}
 _llm_calls_today = {'count':0,'date':None}
 
@@ -210,8 +210,10 @@ def scan_and_trade():
         df_15m=fetch_ohlcv(pair,timeframe='15m',limit=100)
 
         sent  =get_pair_sentiment(pair)
+        ob    =_cache['orderbooks'].get(pair)
         result=generate_signal(df_1h,sentiment_score=sent,strategy=cfg['strategy'],
-                               df_15m=df_15m,pair=pair,open_trades=get_open_trades())
+                               df_15m=df_15m,pair=pair,open_trades=get_open_trades(),
+                               orderbook=ob)
         sig=result['signal']; conf=result['confidence']
         reason=result['reason']; indic=result.get('indicators',{})
         sl_price=result.get('sl_price'); tp_price=result.get('tp_price')
@@ -336,10 +338,12 @@ def refresh_pair_cache():
             res={'signal':'HOLD','confidence':0,'reason':'Loading...','indicators':{}}
             if df_1h is not None and len(df_1h)>=50:
                 df_15m_c=fetch_ohlcv(pair,timeframe='15m',limit=60)
+                ob_c = _cache['orderbooks'].get(pair)
                 res=generate_signal(df_1h,sentiment_score=sent,
                                     strategy=cfg['strategy'],
                                     df_15m=df_15m_c,pair=pair,
-                                    open_trades=get_open_trades())
+                                    open_trades=get_open_trades(),
+                                    orderbook=ob_c)
             pair_data.append({
                 'symbol':pair,'price':price,'change':round(change,2),
                 'signal':res['signal'],'confidence':res['confidence'],
