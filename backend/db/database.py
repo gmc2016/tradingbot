@@ -43,8 +43,8 @@ def init_db():
         ('last_scan_at',''), ('last_scan_result',''),
         ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
         ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
-        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT'),
-        ('capital_floor_pct','8'),
+        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
+        ('capital_floor_pct','10'),
         ('compounding_enabled','false'),
         ('trading_mode_scalp','false'),
         ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
@@ -67,8 +67,8 @@ def init_db():
         ('partial_close_enabled','true'), ('partial_close_at_pct','0.8'), ('max_positions','5'),
         ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
         ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
-        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT'),
-        ('capital_floor_pct','8'),
+        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
+        ('capital_floor_pct','10'),
         ('compounding_enabled','false'),
         ('trading_mode_scalp','false'),
         ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
@@ -91,8 +91,8 @@ def init_db():
 
     # Add performance/protection settings if missing
     perf_defaults = [
-        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT'),
-        ('capital_floor_pct','8'),
+        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
+        ('capital_floor_pct','10'),
         ('compounding_enabled','false'),
     ]
     for k,v in perf_defaults:
@@ -127,6 +127,23 @@ def init_db():
                      if 'LINK' not in p and 'ENJ' not in p and p.strip()]
             if pairs:
                 c.execute("UPDATE settings SET value=? WHERE key='active_pairs'", (','.join(pairs),))
+    except: pass
+
+    # Update capital floor to 10% (safer)
+    try:
+        cur = c.execute("SELECT value FROM settings WHERE key='capital_floor_pct'").fetchone()
+        if cur and float(cur[0]) < 10:
+            c.execute("UPDATE settings SET value='10' WHERE key='capital_floor_pct'")
+    except: pass
+
+    # Add KAT and other losers to flagged pairs
+    try:
+        cur = c.execute("SELECT value FROM settings WHERE key='flagged_pairs'").fetchone()
+        if cur:
+            flagged = set(cur[0].split(','))
+            flagged.update(['KAT/USDT','ORCA/USDT','ZBT/USDT','TRUMP/USDT'])
+            c.execute("UPDATE settings SET value=? WHERE key='flagged_pairs'",
+                      (','.join(f for f in flagged if f),))
     except: pass
 
     # Reset SL/TP if brain set them too tight
