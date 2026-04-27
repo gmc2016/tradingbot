@@ -32,17 +32,78 @@ def get_newsapi_key():   return get_key('newsapi_key')
 def score_to_label(s):
     return 'bullish' if s >= 0.15 else 'bearish' if s <= -0.15 else 'neutral'
 
-def fetch_coindesk_rss():
+# Multi-source RSS feeds — all free, no API key needed
+RSS_FEEDS = [
+    ('CoinDesk',      'https://www.coindesk.com/arc/outboundfeeds/rss/'),
+    ('CoinTelegraph', 'https://cointelegraph.com/rss'),
+    ('Decrypt',       'https://decrypt.co/feed'),
+    ('CCN',           'https://www.ccn.com/news/crypto-news/feeds/'),
+    ('Investing',     'https://www.investing.com/rss/news_301.rss'),
+]
+
+def fetch_rss_feed(source_name, url, limit=20):
+    """Fetch and parse a single RSS feed."""
     try:
         import xml.etree.ElementTree as ET
-        r       = requests.get('https://www.coindesk.com/arc/outboundfeeds/rss/', timeout=10)
-        content = re.sub(r'&(?!amp;|lt;|gt;|quot;|apos;|#\d+;)', '&amp;', r.content.decode('utf-8','replace'))
-        root    = ET.fromstring(content.encode('utf-8'))
-        return [{'title':i.findtext('title',''),'url':i.findtext('link',''),
-                 'source':'CoinDesk','publishedAt':i.findtext('pubDate','')}
-                for i in root.findall('.//item')[:25]]
+        r       = requests.get(url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (compatible; TradingBot/1.0)'
+        })
+        if r.status_code == 403:
+            logger.debug(f'{source_name} RSS: blocked (403) — skip')
+            return []
+        if r.status_code != 200:
+            logger.debug(f'{source_name} RSS: HTTP {r.status_code}')
+            return []
+        text    = re.sub(r'&(?!amp;|lt;|gt;|quot;|apos;|#\d+;)', '&amp;',
+                         r.content.decode('utf-8', 'replace'))
+        root    = ET.fromstring(text.encode('utf-8'))
+        items   = []
+        for i in root.findall('.//item')[:limit]:
+            title = i.findtext('title', '') or ''
+            link  = i.findtext('link', '') or i.findtext('guid', '') or ''
+            pub   = i.findtext('pubDate', '') or ''
+            if title and title != '[Removed]':
+                items.append({
+                    'title':       title.strip(),
+                    'url':         link.strip(),
+                    'source':      source_name,
+                    'publishedAt': pub,
+                })
+        logger.debug(f'{source_name}: {len(items)} articles')
+        return items
     except Exception as e:
-        logger.debug(f'CoinDesk: {e}'); return []
+        logger.debug(f'{source_name} RSS error: {e}')
+        return []
+
+def fetch_coindesk_rss():
+    """Legacy function — now fetches from all sources."""
+    return fetch_all_rss_feeds()
+
+def fetch_all_rss_feeds():
+    """Fetch from all RSS sources in parallel for speed."""
+    import concurrent.futures
+    all_articles = []
+    seen_titles  = set()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+        futures = {ex.submit(fetch_rss_feed, name, url): name
+                   for name, url in RSS_FEEDS}
+        for future in concurrent.futures.as_completed(futures, timeout=15):
+            try:
+                articles = future.result()
+                for a in articles:
+                    # Deduplicate by title
+                    t = a['title'].lower()[:60]
+                    if t not in seen_titles:
+                        seen_titles.add(t)
+                        all_articles.append(a)
+            except Exception as e:
+                logger.debug(f'RSS future error: {e}')
+
+    # Sort by most recent first (rough sort by pubDate string)
+    all_articles.sort(key=lambda x: x.get('publishedAt',''), reverse=True)
+    logger.info(f'RSS: {len(all_articles)} unique articles from {len(RSS_FEEDS)} sources')
+    return all_articles[:100]  # keep top 100
 
 def fetch_newsapi(query='bitcoin OR ethereum OR crypto', page_size=20):
     key = get_newsapi_key()
@@ -63,7 +124,7 @@ def fetch_newsapi(query='bitcoin OR ethereum OR crypto', page_size=20):
 
 def fetch_and_analyze():
     from db.database import insert_news
-    articles = fetch_newsapi() or fetch_coindesk_rss()
+    articles = fetch_newsapi() or fetch_all_rss_feeds()
     if not articles: return
     count = 0
     for a in articles:
@@ -217,15 +278,17 @@ def llm_trade_decision(pair, signal, confidence, indicators, sentiment_score, re
                     f'Recent crypto news:\n{heads or "None"}\n\n'
                     f'Evaluation rules:\n'
                     f'- Consider macro context: if S&P/Nasdaq down >2% today, be MORE cautious on BUYs\n'
-                    f'- If VIX > 30, market fear is high — prefer tighter setups only\n'
+                    f'- If VIX > 35, market fear is extreme — prefer tighter setups only\n'
                     f'- If Fear&Greed < 20, extreme fear can be contrarian buy opportunity\n'
-                    f'- RSI below 28 is STRONGLY oversold — approve BUY unless there is coin-SPECIFIC bad news\n'
-                    f'- RSI above 72 is STRONGLY overbought — approve SELL unless coin-specific good news\n'
-                    f'- General crypto market fear does NOT block a coin-specific oversold signal\n'
-                    f'- A hack on Protocol X does not mean Protocol Y should not be bought\n'
-                    f'- Ranging regime is fine for mean-reversion — DO NOT block oversold signals in ranging markets\n'
-                    f'- Only block if: news is DIRECTLY negative for THIS specific coin, or signal confidence <55\n'
-                    f'- When in doubt, APPROVE — the technical signal exists for a reason\n\n'
+                    f'- RSI below 32 is oversold — approve BUY unless coin-SPECIFIC bad news\n'
+                    f'- RSI above 60 is overbought enough for SELL — do NOT require RSI>72 to approve SELL\n'
+                    f'- RSI 60-72 combined with MACD bear cross + EMA downtrend IS a valid SELL signal\n'
+                    f'- General crypto market fear does NOT block coin-specific technical signals\n'
+                    f'- A hack on Protocol X does not block trading Protocol Y\n'
+                    f'- Ranging regime is fine for mean-reversion trades in BOTH directions\n'
+                    f'- Only block if: news is DIRECTLY about THIS coin negatively, or confidence <50\n'
+                    f'- NEVER reject solely because RSI is not extreme — confluence of indicators matters more\n'
+                    f'- When in doubt, APPROVE — missing a good trade is worse than taking a small loss\n\n'
                     f'Respond JSON only:\n'
                     f'{{"approved":<true|false>,"reasoning":"one sentence",'
                     f'"adjusted_confidence":<0-100>,"risk_level":"low|medium|high"}}'}]},
