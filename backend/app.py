@@ -467,6 +467,21 @@ def set_watchlist_route():
     alog('settings', f'Watchlist updated: {", ".join(pairs[:5])}{"..." if len(pairs)>5 else ""}')
     return jsonify({'ok': True, 'pairs': pairs})
 
+@app.route('/api/orderbook/update', methods=['POST'])
+@login_required
+def update_orderbook():
+    """Frontend pushes order book data so backend can use it in signal generation."""
+    from bot.engine import _cache
+    data = request.json or {}
+    pair = data.get('pair')
+    if pair and data.get('bids') and data.get('asks'):
+        _cache['orderbooks'][pair] = {
+            'bids': data['bids'],
+            'asks': data['asks'],
+            'updated': datetime.utcnow().isoformat(),
+        }
+    return jsonify({'ok': True})
+
 @app.route('/api/kline/subscribe', methods=['POST'])
 @login_required
 def kline_subscribe():
