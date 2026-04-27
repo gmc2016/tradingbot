@@ -15,8 +15,8 @@ EXCLUDE = {
     'SPK/USDT','GUN/USDT','CFG/USDT','PROM/USDT','UTK/USDT',
     'HIGH/USDT','SUPER/USDT','GIGGLE/USDT','AUDIO/USDT','ONT/USDT',
     'ALICE/USDT','PORTAL/USDT','MOVR/USDT','ENJ/USDT','ORDI/USDT',
-    # Consistently underperforming — removed based on trade data
-    'ENJ/USDT',
+    # Proven losers from live trading data
+    'KAT/USDT','ORCA/USDT','ZBT/USDT','TRUMP/USDT','API3/USDT',
 }
 
 # Quality coins by sector — scanner will prefer these
@@ -66,7 +66,11 @@ def fetch_all_usdt_tickers():
             high  = t.get('high', price) or price
             low   = t.get('low',  price) or price
             chg   = t.get('percentage', 0) or 0
-            if vol < 15_000_000: continue  # Min $15M daily volume (expanded universe)
+            if vol < 15_000_000: continue  # Min $15M daily volume
+            # Skip micro-priced coins — ATR too large relative to price
+            ticker_data = tickers.get(sym, {})
+            last_price = ticker_data.get('last', 0) or 0
+            if last_price < 0.0001 or last_price > 100000: continue
             if price <= 0: continue
             # Intraday range % — proxy for volatility without needing OHLCV
             range_pct = ((high - low) / low * 100) if low > 0 else 0
