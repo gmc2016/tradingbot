@@ -20,6 +20,10 @@ init_db(); init_auth(); init_activity_log()
 from bot.engine import (scan_and_trade, get_dashboard_data, start_cache_refresh,
                          refresh_pair_cache, open_manual_trade, close_manual_trade)
 from bot.scanner import run_scanner, apply_scanner_results
+from bot.grid import run_grid_cycle, get_grid_status
+from bot.funding import get_funding_summary, get_best_funding_opportunity
+from bot.earn import get_earn_summary
+from bot.futures_signal import get_futures_opportunities
 from bot.macro import fetch_all_macro, get_macro_risk_level
 from bot.account import get_full_account_status
 from ai.sentiment import fetch_and_analyze
@@ -223,6 +227,12 @@ def scanner_cycle():
             push()
     except Exception as e: logger.error(f'Scanner: {e}')
 
+def grid_cycle():
+    try:
+        run_grid_cycle()
+        push()
+    except Exception as e: logger.error(f'Grid: {e}')
+
 def brain_cycle():
     try:
         if _gs('ai_brain_enabled')!='true': return
@@ -242,6 +252,7 @@ scheduler.add_job(macro_cycle,  'interval',minutes=15, id='macro',  max_instance
 # Scalp mode removed — smart mode with quality filters is more profitable
 scheduler.add_job(scanner_cycle,'interval',hours=1,    id='scanner',max_instances=1,misfire_grace_time=300)
 scheduler.add_job(brain_cycle,  'interval',minutes=30, id='brain',  max_instances=1,misfire_grace_time=120)
+scheduler.add_job(grid_cycle,   'interval',minutes=5,  id='grid',   max_instances=1,misfire_grace_time=30,coalesce=True)
 scheduler.start()
 start_cache_refresh()
 eventlet.spawn_after(3, start_price_stream)
@@ -338,7 +349,9 @@ def get_settings():
           'scanner_enabled','scanner_interval_hours','scanner_auto_update',
           'scanner_top_n','pinned_pairs','ai_brain_enabled',
           'scalp_tp_pct','scalp_sl_pct','scalp_trail_pct','scalp_pos_size','scalp_pairs',
-          'capital_floor_pct','compounding_enabled']
+          'capital_floor_pct','compounding_enabled',
+          'grid_enabled','grid_pair','grid_capital','grid_levels','grid_range_pct',
+          'futures_enabled','futures_leverage','futures_min_conf','futures_size','futures_pairs']
     data={k:_gs(k) for k in keys}
     data['watchlist'] = get_setting('watchlist') or 'BTC/USDT,ETH/USDT'
     data['binance_api_key']   ='***' if get_setting('binance_api_key')    else ''
@@ -600,6 +613,42 @@ def reset_demo():
         alog('system',f'Demo reset: {deleted} trades deleted, balance reset to ${starting}')
         push()
         return jsonify({'ok':True,'deleted_trades':deleted,'new_balance':starting})
+    except Exception as e: return jsonify({'error':str(e)}),500
+
+@app.route('/api/grid')
+@login_required
+def grid_status():
+    try: return jsonify(get_grid_status())
+    except Exception as e: return jsonify({'error':str(e)}),500
+
+@app.route('/api/grid/reset',methods=['POST'])
+@login_required
+def grid_reset():
+    from db.database import set_setting
+    set_setting('grid_state','{}')
+    return jsonify({'ok':True})
+
+@app.route('/api/funding')
+@login_required
+def funding():
+    try: return jsonify(get_funding_summary() or {})
+    except Exception as e: return jsonify({'error':str(e)}),500
+
+@app.route('/api/earn')
+@login_required
+def earn():
+    try:
+        from bot.engine import get_demo_balance, get_open_trades
+        from db.database import get_setting
+        balance = get_demo_balance()
+        open_val = sum(t['entry_price']*t['quantity'] for t in get_open_trades())
+        return jsonify(get_earn_summary(balance, open_val))
+    except Exception as e: return jsonify({'error':str(e)}),500
+
+@app.route('/api/futures/opportunities')
+@login_required
+def futures_opps():
+    try: return jsonify(get_futures_opportunities())
     except Exception as e: return jsonify({'error':str(e)}),500
 
 @app.route('/api/performance')
