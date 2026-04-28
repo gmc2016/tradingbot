@@ -9,7 +9,7 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
     starting_balance:'1000', strategy_mode:'combined',
     trailing_stop_enabled:'true', trailing_stop_pct:'0.8',
     partial_close_enabled:'true', partial_close_at_pct:'1.5', partial_close_size_pct:'50',
-    max_loss_streak:'3', cooldown_minutes:'60', capital_floor_pct:'8', compounding_enabled:'false',
+    max_loss_streak:'3', cooldown_minutes:'60', capital_floor_pct:'10', compounding_enabled:'false',
     binance_api_key:'', binance_api_secret:'', newsapi_key:'', anthropic_api_key:'',
     scanner_enabled:'true', scanner_auto_update:'true', scanner_top_n:'8', pinned_pairs:'BTC/USDT,ETH/USDT',
   })
@@ -27,15 +27,21 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
       const r  = await axios.get('/api/settings', { withCredentials: true })
       const s  = r.data
       const ap = Array.isArray(s.active_pairs) ? s.active_pairs.join(',') : (s.active_pairs||'')
+      // Normalize boolean fields that backend might return as actual booleans
+      const boolStr = (v, def='false') => {
+        if (v === true  || v === 'true')  return 'true'
+        if (v === false || v === 'false') return 'false'
+        return def
+      }
       setF(prev => ({
         ...prev,
         // Strategy & AI
         strategy_mode:           s.strategy_mode          || prev.strategy_mode,
-        use_llm_filter:          s.use_llm_filter         || 'false',
+        use_llm_filter:          boolStr(s.use_llm_filter, 'true'),
         mtf_enabled:             s.mtf_enabled            || 'false',
         max_loss_streak:         s.max_loss_streak        || prev.max_loss_streak,
-        capital_floor_pct:       s.capital_floor_pct      || prev.capital_floor_pct,
-        compounding_enabled:     s.compounding_enabled    || prev.compounding_enabled,
+        capital_floor_pct:       (s.capital_floor_pct != null && s.capital_floor_pct !== '' ? s.capital_floor_pct : prev.capital_floor_pct),
+        compounding_enabled:     (s.compounding_enabled != null ? String(s.compounding_enabled) : prev.compounding_enabled),
         cooldown_minutes:        s.cooldown_minutes       || prev.cooldown_minutes,
         // Risk
         stop_loss_pct:           s.stop_loss_pct          || prev.stop_loss_pct,
@@ -151,11 +157,11 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
 
             <Divider/>
             <SectionHead label="AI / LLM settings"/>
-            <Toggle label="Use Claude AI to filter trades (requires Anthropic key)" value={f.use_llm_filter==='true'} onClick={()=>toggle('use_llm_filter')}/>
+            <Toggle label="Use Claude AI to filter trades (requires Anthropic key)" value={f.use_llm_filter==='true'||f.use_llm_filter===true} onClick={()=>toggle('use_llm_filter')}/>
             {f.use_llm_filter==='true'&&<div style={{fontSize:11,color:'var(--text-3)',marginTop:4,marginBottom:8,lineHeight:1.5}}>
               Before each trade, Claude AI evaluates the signal against recent news and market context. Requires Anthropic API key in API Keys tab. Without the key this setting is ignored.
             </div>}
-            <Toggle label="Multi-timeframe confirmation (4h confirms 1h signal)" value={f.mtf_enabled==='true'} onClick={()=>toggle('mtf_enabled')}/>
+            <Toggle label="Multi-timeframe confirmation (4h confirms 1h signal)" value={f.mtf_enabled==='true'||f.mtf_enabled===true} onClick={()=>toggle('mtf_enabled')}/>
             {f.mtf_enabled==='true'&&<div style={{fontSize:11,color:'var(--text-3)',marginTop:4,marginBottom:8,lineHeight:1.5}}>
               In Combined/MTF mode, 4h candles are fetched alongside 1h. Improves signal quality but uses more API calls.
             </div>}
@@ -171,7 +177,7 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
               </Field>
               <Field label="Semi-compounding" hint="Position size grows with balance">
                 <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',marginTop:4}}>
-                  <input type="checkbox" checked={f.compounding_enabled==='true'}
+                  <input type="checkbox" checked={f.compounding_enabled==='true' || f.compounding_enabled===true}
                     onChange={e=>set('compounding_enabled',e.target.checked?'true':'false')}/>
                   <span style={{fontSize:12}}>Grow positions with profits</span>
                 </label>
@@ -227,7 +233,7 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
             <SectionHead label="Partial close — take early profits"/>
             <Toggle
               label="Enable partial close"
-              value={f.partial_close_enabled==='true'}
+              value={f.partial_close_enabled==='true'||f.partial_close_enabled===true}
               onClick={()=>toggle('partial_close_enabled')}
             />
             {f.partial_close_enabled==='true'&&<>
@@ -250,7 +256,7 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
             <SectionHead label="Trailing stop — follow the price up"/>
             <Toggle
               label="Enable trailing stop"
-              value={f.trailing_stop_enabled==='true'}
+              value={f.trailing_stop_enabled==='true'||f.trailing_stop_enabled===true}
               onClick={()=>toggle('trailing_stop_enabled')}
             />
             {f.trailing_stop_enabled==='true'&&<>
@@ -272,9 +278,9 @@ export default function SettingsModal({ config={}, onSave, onClose, onLogout, us
               Which trading pairs the bot monitors and trades. Add any Binance spot pair ending in USDT. More pairs = more opportunities but also more concurrent positions possible.
             </InfoBox>
             <SectionHead label="Smart scanner"/>
-            <Toggle label="Enable automatic pair scanning (runs every 6 hours)" value={f.scanner_enabled==='true'} onClick={()=>toggle('scanner_enabled')}/>
+            <Toggle label="Enable automatic pair scanning (runs every 6 hours)" value={f.scanner_enabled==='true'||f.scanner_enabled===true} onClick={()=>toggle('scanner_enabled')}/>
             {f.scanner_enabled==='true'&&<>
-              <Toggle label="Auto-update active pairs after each scan" value={f.scanner_auto_update==='true'} onClick={()=>toggle('scanner_auto_update')}/>
+              <Toggle label="Auto-update active pairs after each scan" value={f.scanner_auto_update==='true'||f.scanner_auto_update===true} onClick={()=>toggle('scanner_auto_update')}/>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginTop:10}}>
                 <Field label="Top N pairs to select" hint="from scan results">
                   <input type="number" step="1" min="3" max="15" value={f.scanner_top_n} onChange={e=>set('scanner_top_n',e.target.value)}/>
