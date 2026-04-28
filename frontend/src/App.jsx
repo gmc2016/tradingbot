@@ -20,6 +20,7 @@ import TickerStrip   from './components/TickerStrip'
 import WatchlistPanel from './components/WatchlistPanel'
 import MacroPanel    from './components/MacroPanel'
 import PerformanceWidget from './components/PerformanceWidget'
+import EarnPanel from './components/EarnPanel'
 
 function Dashboard({ auth, logout }) {
   const { data, connected, prices, startBot, stopBot, setMode, runNow, refreshNews, updateSettings } = useDashboard()
@@ -34,6 +35,7 @@ function Dashboard({ auth, logout }) {
   const [showBrain,     setShowBrain]     = useState(false)
   const [showActivity,   setShowActivity]  = useState(false)
   const [showWatchlist,  setShowWatchlist] = useState(false)
+  const [showEarn,       setShowEarn]       = useState(false)
   const [showMacro,      setShowMacro]     = useState(false)
 
   const handleModeChange = (mode) => {
@@ -74,6 +76,7 @@ function Dashboard({ auth, logout }) {
     ['🧠 AI Brain',      () => setShowBrain(true)],
     ['📡 Activity',      () => setShowActivity(true)],
     ['👁 Watchlist',     () => setShowWatchlist(true)],
+    ['💹 Binance+',      () => setShowEarn(true)],
     ['🌍 Macro',         () => setShowMacro(v => !v)],
   ]
 
@@ -127,6 +130,7 @@ function Dashboard({ auth, logout }) {
       {showAccount&&<AccountPage onClose={()=>setShowAccount(false)}/>}
       {showBrain&&<BrainPanel config={config} onClose={()=>setShowBrain(false)}/>}
       {showActivity&&<ActivityLog onClose={()=>setShowActivity(false)}/>}
+      {showEarn&&<EarnPanel onClose={()=>setShowEarn(false)}/>}
       {showWatchlist&&<WatchlistPanel onClose={()=>setShowWatchlist(false)} prices={prices} onSelectPair={setSelectedPair}/>}
       {showTrade&&(
         <ManualTrade
