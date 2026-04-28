@@ -46,6 +46,14 @@ def init_db():
         ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
         ('capital_floor_pct','10'),
         ('compounding_enabled','false'),
+        # Grid trading
+        ('grid_enabled','false'), ('grid_pair','BTC/USDT'),
+        ('grid_capital','200'), ('grid_levels','10'),
+        ('grid_range_pct','4.0'), ('grid_state','{}'),
+        # Futures amplification
+        ('futures_enabled','false'), ('futures_leverage','2'),
+        ('futures_min_conf','80'), ('futures_size','50'),
+        ('futures_pairs','BTC/USDT,ETH/USDT'),
         ('trading_mode_scalp','false'),
         ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
         ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
@@ -70,6 +78,14 @@ def init_db():
         ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
         ('capital_floor_pct','10'),
         ('compounding_enabled','false'),
+        # Grid trading
+        ('grid_enabled','false'), ('grid_pair','BTC/USDT'),
+        ('grid_capital','200'), ('grid_levels','10'),
+        ('grid_range_pct','4.0'), ('grid_state','{}'),
+        # Futures amplification
+        ('futures_enabled','false'), ('futures_leverage','2'),
+        ('futures_min_conf','80'), ('futures_size','50'),
+        ('futures_pairs','BTC/USDT,ETH/USDT'),
         ('trading_mode_scalp','false'),
         ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
         ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
@@ -94,6 +110,14 @@ def init_db():
         ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
         ('capital_floor_pct','10'),
         ('compounding_enabled','false'),
+        # Grid trading
+        ('grid_enabled','false'), ('grid_pair','BTC/USDT'),
+        ('grid_capital','200'), ('grid_levels','10'),
+        ('grid_range_pct','4.0'), ('grid_state','{}'),
+        # Futures amplification
+        ('futures_enabled','false'), ('futures_leverage','2'),
+        ('futures_min_conf','80'), ('futures_size','50'),
+        ('futures_pairs','BTC/USDT,ETH/USDT'),
     ]
     for k,v in perf_defaults:
         c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,v))
@@ -128,6 +152,17 @@ def init_db():
             if pairs:
                 c.execute("UPDATE settings SET value=? WHERE key='active_pairs'", (','.join(pairs),))
     except: pass
+
+    # Add new feature settings if missing
+    new_settings = [
+        ('grid_enabled','false'), ('grid_pair','BTC/USDT'),
+        ('grid_capital','200'), ('grid_levels','10'),
+        ('grid_range_pct','4.0'), ('grid_state','{}'),
+        ('futures_enabled','false'), ('futures_leverage','2'),
+        ('futures_min_conf','80'), ('futures_size','50'),
+    ]
+    for k,v in new_settings:
+        c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,v))
 
     # Update capital floor to 10% (safer)
     try:
