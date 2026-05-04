@@ -70,7 +70,7 @@ def fetch_all_usdt_tickers():
             # Skip micro-priced coins — ATR too large relative to price
             ticker_data = tickers.get(sym, {})
             last_price = ticker_data.get('last', 0) or 0
-            if last_price < 0.0001 or last_price > 100000: continue
+            if last_price < 1.0 or last_price > 100000: continue  # min $1.00 per coin
             if price <= 0: continue
             # Intraday range % — proxy for volatility without needing OHLCV
             range_pct = ((high - low) / low * 100) if low > 0 else 0
