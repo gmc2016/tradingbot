@@ -202,6 +202,15 @@ def scan_and_trade():
         from db.database import get_setting as _gs2
         flagged = [p.strip() for p in (_gs2('flagged_pairs') or '').split(',')]
         if pair in flagged: continue
+        # Also auto-flag if pair was previously flagged by performance module
+        from bot.performance import get_flagged_pairs
+        if pair in get_flagged_pairs(): continue
+
+        # Skip coins under $1 — ATR too wide, gap-down risk (check price early)
+        ticker_quick = fetch_ticker(pair)
+        if not ticker_quick or ticker_quick.get('last',0) < 1.0:
+            if ticker_quick: logger.debug(f'Skipping {pair} — price ${ticker_quick["last"]:.4f} < $1.00')
+            continue
 
         df_1h=fetch_ohlcv(pair,timeframe='1h',limit=300)
         if df_1h is None or len(df_1h)<50: continue
