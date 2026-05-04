@@ -1,0 +1,392 @@
+import sqlite3, os, hashlib, secrets
+from datetime import datetime
+
+DB_PATH = os.environ.get('DB_PATH', '/app/data/trading.db')
+
+def get_conn():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_conn(); c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS trades (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mode TEXT, pair TEXT, side TEXT,
+        entry_price REAL, exit_price REAL, quantity REAL, pnl REAL,
+        status TEXT DEFAULT 'open',
+        strategy_reason TEXT, stop_loss REAL, take_profit REAL,
+        opened_at TEXT, closed_at TEXT, order_id TEXT, trailing_stop REAL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS news_cache (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT, source TEXT, url TEXT,
+        sentiment TEXT, sentiment_score REAL,
+        published_at TEXT, fetched_at TEXT)''')
+
+    # All defaults
+    defaults = [
+        ('max_positions','5'), ('stop_loss_pct','1.5'), ('take_profit_pct','3.0'),
+        ('position_size_usdt','100'),
+        ('trading_mode', os.environ.get('TRADING_MODE','demo')),
+        ('active_pairs','BNB/USDT,SOL/USDT,XRP/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT,ATOM/USDT,NEAR/USDT,ARB/USDT'),
+        ('bot_running','false'), ('starting_balance','1000'),
+        ('trailing_stop_enabled','true'), ('trailing_stop_pct','0.8'),
+        ('partial_close_enabled','true'), ('partial_close_at_pct','0.8'),
+        ('partial_close_size_pct','50'), ('strategy_mode','combined'),
+        ('max_loss_streak','3'), ('cooldown_minutes','60'),
+        ('use_llm_filter','false'), ('mtf_enabled','false'),
+        ('scanner_enabled','true'), ('scanner_interval_hours','6'),
+        ('scanner_auto_update','true'), ('scanner_top_n','8'),
+        ('pinned_pairs','BTC/USDT,ETH/USDT,SOL/USDT,AAVE/USDT'),
+        ('last_scan_at',''), ('last_scan_result',''),
+        ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
+        ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
+        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
+        ('capital_floor_pct','10'),
+        ('compounding_enabled','false'),
+        # Grid trading
+        ('grid_enabled','false'), ('grid_pair','BTC/USDT'),
+        ('grid_capital','200'), ('grid_levels','10'),
+        ('grid_range_pct','4.0'), ('grid_state','{}'),
+        # Futures amplification
+        ('futures_enabled','false'), ('futures_leverage','2'),
+        ('futures_min_conf','80'), ('futures_size','50'),
+        ('futures_pairs','BTC/USDT,ETH/USDT'),
+        ('trading_mode_scalp','false'),
+        ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
+        ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
+        ('scalp_pairs','BTC/USDT,SOL/USDT'),
+        ('demo_fee_rate','0.1'),
+    ]
+    for k, v in defaults:
+        c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (k, v))
+
+    # Migration: add any missing keys to existing DBs
+    migration = [
+        ('use_llm_filter','false'), ('mtf_enabled','false'),
+        ('scanner_enabled','true'), ('scanner_auto_update','true'),
+        ('scanner_top_n','8'), ('scanner_interval_hours','6'),
+        ('pinned_pairs','BTC/USDT,ETH/USDT,SOL/USDT,AAVE/USDT'),
+        ('last_scan_at',''), ('last_scan_result',''),
+        ('strategy_mode','combined'), ('max_loss_streak','3'),
+        ('cooldown_minutes','60'), ('trailing_stop_enabled','true'),
+        ('partial_close_enabled','true'), ('partial_close_at_pct','0.8'), ('max_positions','5'),
+        ('ai_brain_enabled','false'), ('brain_log','[]'), ('last_brain_run',''),
+        ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
+        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
+        ('capital_floor_pct','10'),
+        ('compounding_enabled','false'),
+        # Grid trading
+        ('grid_enabled','false'), ('grid_pair','BTC/USDT'),
+        ('grid_capital','200'), ('grid_levels','10'),
+        ('grid_range_pct','4.0'), ('grid_state','{}'),
+        # Futures amplification
+        ('futures_enabled','false'), ('futures_leverage','2'),
+        ('futures_min_conf','80'), ('futures_size','50'),
+        ('futures_pairs','BTC/USDT,ETH/USDT'),
+        ('trading_mode_scalp','false'),
+        ('scalp_tp_pct','0.4'), ('scalp_sl_pct','0.25'),
+        ('scalp_trail_pct','0.2'), ('scalp_pos_size','100'),
+        ('scalp_pairs','BTC/USDT,SOL/USDT'),
+        ('demo_fee_rate','0.1'),
+        ('anthropic_api_key', os.environ.get('ANTHROPIC_API_KEY','')),
+        ('binance_api_key',   os.environ.get('BINANCE_API_KEY','')),
+        ('binance_api_secret',os.environ.get('BINANCE_API_SECRET','')),
+        ('newsapi_key',       os.environ.get('NEWSAPI_KEY','')),
+    ]
+    # Update scalp settings to safer defaults
+    try:
+        c.execute("UPDATE settings SET value='SOL/USDT' WHERE key='scalp_pairs'")
+        c.execute("UPDATE settings SET value='0.35' WHERE key='scalp_sl_pct'")
+        c.execute("UPDATE settings SET value='50' WHERE key='scalp_pos_size'")
+    except: pass
+
+
+
+    # Add performance/protection settings if missing
+    perf_defaults = [
+        ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
+        ('capital_floor_pct','10'),
+        ('compounding_enabled','false'),
+        # Grid trading
+        ('grid_enabled','false'), ('grid_pair','BTC/USDT'),
+        ('grid_capital','200'), ('grid_levels','10'),
+        ('grid_range_pct','4.0'), ('grid_state','{}'),
+        # Futures amplification
+        ('futures_enabled','false'), ('futures_leverage','2'),
+        ('futures_min_conf','80'), ('futures_size','50'),
+        ('futures_pairs','BTC/USDT,ETH/USDT'),
+    ]
+    for k,v in perf_defaults:
+        c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,v))
+
+    # Add scalp settings if missing
+    scalp_defaults = [
+        ('trading_mode_scalp','false'),('scalp_tp_pct','0.4'),
+        ('scalp_sl_pct','0.35'),('scalp_trail_pct','0.2'),
+        ('scalp_pos_size','50'),('scalp_pairs','BTC/USDT,ETH/USDT'),
+        ('demo_fee_rate','0.1'),
+    ]
+    for k,v in scalp_defaults:
+        c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,v))
+
+    # Restore active pairs if empty (migration bug wiped them)
+    try:
+        cur = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
+        if not cur or not cur[0] or cur[0].strip() == '':
+            good_pairs = 'BNB/USDT,SOL/USDT,XRP/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT,ATOM/USDT,NEAR/USDT,ARB/USDT'
+            c.execute("INSERT OR REPLACE INTO settings VALUES ('active_pairs',?)", (good_pairs,))
+    except: pass
+
+        # Remove consistent losers: LINK, ENJ, BTC, ETH from active pairs
+    try:
+        cur_pairs = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
+        if cur_pairs:
+            remove = {'LINK/USDT','ENJ/USDT'}
+            pairs = [p.strip() for p in cur_pairs[0].split(',')
+                     if p.strip() and p.strip() not in remove]
+            if pairs:
+                c.execute("UPDATE settings SET value=? WHERE key='active_pairs'", (','.join(pairs),))
+    except: pass
+
+    # Restore active pairs if empty (migration bug wiped them)
+    try:
+        cur = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
+        if not cur or not cur[0] or cur[0].strip() == '':
+            good_pairs = 'BNB/USDT,SOL/USDT,XRP/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT,ATOM/USDT,NEAR/USDT,ARB/USDT'
+            c.execute("INSERT OR REPLACE INTO settings VALUES ('active_pairs',?)", (good_pairs,))
+    except: pass
+
+        # Remove consistent losers: LINK, ENJ, BTC, ETH from active pairs
+    try:
+        cur_pairs = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
+        if cur_pairs:
+            pairs = [p.strip() for p in cur_pairs[0].split(',')
+                     if 'LINK' not in p and 'ENJ' not in p and p.strip()]
+            if pairs:
+                c.execute("UPDATE settings SET value=? WHERE key='active_pairs'", (','.join(pairs),))
+    except: pass
+
+    # Add new feature settings if missing
+    new_settings = [
+        ('grid_enabled','false'), ('grid_pair','BTC/USDT'),
+        ('grid_capital','200'), ('grid_levels','10'),
+        ('grid_range_pct','4.0'), ('grid_state','{}'),
+        ('futures_enabled','false'), ('futures_leverage','2'),
+        ('futures_min_conf','80'), ('futures_size','50'),
+    ]
+    for k,v in new_settings:
+        c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,v))
+
+    # Update capital floor to 10% (safer)
+    try:
+        cur = c.execute("SELECT value FROM settings WHERE key='capital_floor_pct'").fetchone()
+        if cur and float(cur[0]) < 10:
+            c.execute("UPDATE settings SET value='10' WHERE key='capital_floor_pct'")
+    except: pass
+
+    # Set flagged pairs — known losers only, don't over-flag
+    try:
+        c.execute("UPDATE settings SET value='KAT/USDT,ORCA/USDT,ZBT/USDT,TRUMP/USDT,PENGU/USDT,ENJ/USDT,LINK/USDT,BTC/USDT,ETH/USDT' WHERE key='flagged_pairs'")
+    except: pass
+
+    # Reset SL/TP if brain set them too tight
+    try:
+        cur_sl = c.execute("SELECT value FROM settings WHERE key='stop_loss_pct'").fetchone()
+        if cur_sl and float(cur_sl[0]) < 1.2:
+            c.execute("UPDATE settings SET value='1.5' WHERE key='stop_loss_pct'")
+        cur_tp = c.execute("SELECT value FROM settings WHERE key='take_profit_pct'").fetchone()
+        if cur_tp and float(cur_tp[0]) < 2.0:
+            c.execute("UPDATE settings SET value='2.5' WHERE key='take_profit_pct'")
+    except: pass
+
+    # Ensure trailing stop pct is at good default (brain may have changed it)
+    try:
+        cur_trail = c.execute("SELECT value FROM settings WHERE key='trailing_stop_pct'").fetchone()
+        if cur_trail and float(cur_trail[0]) < 0.5:
+            c.execute("UPDATE settings SET value='0.8' WHERE key='trailing_stop_pct'")
+    except: pass
+
+    # Force update partial_close_at_pct if still at old default 1.5
+    try:
+        cur_pc = c.execute("SELECT value FROM settings WHERE key='partial_close_at_pct'").fetchone()
+        if cur_pc and cur_pc[0] == '1.5':
+            c.execute("UPDATE settings SET value='0.8' WHERE key='partial_close_at_pct'")
+    except: pass
+
+    # Force reset pairs if they contain known micro-cap junk from scanner
+    try:
+        current_pairs = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
+        if current_pairs:
+            pairs = current_pairs[0] or ''
+            junk  = ['SPK','GUN','CFG','PROM','UTK','HIGH','SUPER','GIGGLE',
+                     'AUDIO','ONT','ALICE','PORTAL','MOVR','ENJ','ORDI']
+            if any(j+'/' in pairs for j in junk):
+                c.execute("UPDATE settings SET value=? WHERE key='active_pairs'",
+                    ('BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT,XRP/USDT,LINK/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT',))
+                c.execute("UPDATE settings SET value=? WHERE key='pinned_pairs'",
+                    ('BTC/USDT,ETH/USDT,BNB/USDT,SOL/USDT',))
+    except: pass
+
+    for k, v in migration:
+        c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (k, v))
+
+    conn.commit(); conn.close()
+
+def get_setting(k):
+    try:
+        conn = get_conn()
+        row  = conn.execute('SELECT value FROM settings WHERE key=?', (k,)).fetchone()
+        conn.close()
+        return row['value'] if row else None
+    except: return None
+
+def set_setting(k, v):
+    conn = get_conn()
+    conn.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', (k, v))
+    conn.commit(); conn.close()
+
+def insert_trade(mode, pair, side, entry, qty, sl, tp, reason, order_id=None):
+    conn = get_conn()
+    c = conn.execute(
+        '''INSERT INTO trades (mode,pair,side,entry_price,quantity,stop_loss,take_profit,
+           strategy_reason,status,opened_at,order_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+        (mode, pair, side, entry, qty, sl, tp, reason, 'open',
+         datetime.utcnow().isoformat(), order_id))
+    tid = c.lastrowid
+    conn.commit(); conn.close()
+    return tid
+
+def close_trade(tid, exit_price, pnl):
+    conn = get_conn()
+    conn.execute(
+        'UPDATE trades SET status=?,exit_price=?,pnl=?,closed_at=? WHERE id=?',
+        ('closed', exit_price, pnl, datetime.utcnow().isoformat(), tid))
+    conn.commit(); conn.close()
+
+def partial_close_trade(tid, new_qty, partial_pnl):
+    conn = get_conn()
+    conn.execute('UPDATE trades SET quantity=?,pnl=COALESCE(pnl,0)+? WHERE id=?',
+                 (new_qty, partial_pnl, tid))
+    conn.commit(); conn.close()
+
+def update_trailing_stop(tid, new_sl):
+    conn = get_conn()
+    conn.execute('UPDATE trades SET stop_loss=?,trailing_stop=1 WHERE id=?', (new_sl, tid))
+    conn.commit(); conn.close()
+
+def update_trailing_tp(tid, new_tp):
+    conn = get_conn()
+    conn.execute('UPDATE trades SET take_profit=?,trailing_stop=1 WHERE id=?', (new_tp, tid))
+    conn.commit(); conn.close()
+
+def get_open_trades():
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM trades WHERE status='open'").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_recent_trades(limit=50):
+    conn = get_conn()
+    rows = conn.execute(
+        'SELECT * FROM trades ORDER BY opened_at DESC LIMIT ?', (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_all_trades(page=1, per_page=50, pair=None, status=None,
+                   strategy=None, date_from=None, date_to=None):
+    conn = get_conn()
+    conditions = []; params = []
+    if pair:      conditions.append('pair=?');                   params.append(pair)
+    if status:    conditions.append('status=?');                 params.append(status)
+    if strategy:  conditions.append('LOWER(strategy_reason) LIKE ?'); params.append(f'%{strategy}%')
+    if date_from: conditions.append('date(opened_at)>=?');       params.append(date_from)
+    if date_to:   conditions.append('date(opened_at)<=?');       params.append(date_to)
+    where  = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
+    total  = conn.execute(f'SELECT COUNT(*) as c FROM trades {where}', params).fetchone()['c']
+    offset = (page-1)*per_page
+    rows   = conn.execute(
+        f'SELECT * FROM trades {where} ORDER BY opened_at DESC LIMIT ? OFFSET ?',
+        params+[per_page, offset]).fetchall()
+    conn.close()
+    return {'trades':[dict(r) for r in rows],'total':total,'page':page,'per_page':per_page}
+
+def get_stats():
+    conn = get_conn()
+    r = conn.execute('''SELECT
+        COUNT(*) as total_trades,
+        SUM(CASE WHEN pnl>0 THEN 1 ELSE 0 END) as wins,
+        SUM(CASE WHEN pnl<0 THEN 1 ELSE 0 END) as losses,
+        ROUND(SUM(CASE WHEN pnl>0 THEN pnl ELSE 0 END),2) as gross_profit,
+        ROUND(SUM(CASE WHEN pnl<0 THEN pnl ELSE 0 END),2) as gross_loss,
+        ROUND(SUM(COALESCE(pnl,0)),2) as total_pnl,
+        ROUND(AVG(CASE WHEN pnl IS NOT NULL THEN pnl END),4) as avg_pnl
+        FROM trades WHERE status="closed"''').fetchone()
+    today = conn.execute('''SELECT
+        COUNT(*) as trades_today,
+        ROUND(SUM(COALESCE(pnl,0)),2) as pnl_today
+        FROM trades WHERE status="closed" AND date(closed_at)=date("now")''').fetchone()
+    conn.close()
+    d = dict(r); d.update(dict(today))
+    total = d.get('total_trades',0)
+    wins  = d.get('wins',0) or 0
+    d['win_rate'] = round(wins/total*100,1) if total>0 else 0
+    return d
+
+def get_news(limit=20):
+    conn = get_conn()
+    rows = conn.execute(
+        'SELECT * FROM news_cache ORDER BY fetched_at DESC LIMIT ?', (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def insert_news(title, source, url, sentiment, score, published_at):
+    conn = get_conn()
+    existing = conn.execute('SELECT id FROM news_cache WHERE title=?', (title,)).fetchone()
+    if not existing:
+        conn.execute(
+            '''INSERT INTO news_cache (title,source,url,sentiment,sentiment_score,
+               published_at,fetched_at) VALUES (?,?,?,?,?,?,?)''',
+            (title, source, url, sentiment, score, published_at,
+             datetime.utcnow().isoformat()))
+        conn.execute(
+            'DELETE FROM news_cache WHERE id NOT IN '
+            '(SELECT id FROM news_cache ORDER BY fetched_at DESC LIMIT 200)')
+    conn.commit(); conn.close()
+
+# ── Auth ───────────────────────────────────────────────────────────────────────
+def hash_password(pw):
+    salt = secrets.token_hex(16)
+    h    = hashlib.sha256((salt+pw).encode()).hexdigest()
+    return f'{salt}:{h}'
+
+def verify_password(pw, stored):
+    try:
+        salt, h = stored.split(':')
+        return hashlib.sha256((salt+pw).encode()).hexdigest() == h
+    except: return False
+
+def init_auth():
+    conn = get_conn(); c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT)''')
+    if c.execute('SELECT COUNT(*) as n FROM users').fetchone()['n'] == 0:
+        c.execute('INSERT INTO users (username,password_hash) VALUES (?,?)',
+                  ('admin', hash_password('admin')))
+    conn.commit(); conn.close()
+
+def check_login(username, password):
+    conn = get_conn()
+    row  = conn.execute('SELECT password_hash FROM users WHERE username=?',
+                        (username,)).fetchone()
+    conn.close()
+    return bool(row and verify_password(password, row['password_hash']))
+
+def change_password(username, new_password):
+    conn = get_conn()
+    conn.execute('UPDATE users SET password_hash=? WHERE username=?',
+                 (hash_password(new_password), username))
+    conn.commit(); conn.close()
