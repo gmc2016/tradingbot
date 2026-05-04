@@ -30,7 +30,7 @@ def init_db():
         ('max_positions','5'), ('stop_loss_pct','1.5'), ('take_profit_pct','3.0'),
         ('position_size_usdt','100'),
         ('trading_mode', os.environ.get('TRADING_MODE','demo')),
-        ('active_pairs','BNB/USDT,SOL/USDT,XRP/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT,PEPE/USDT,NEIRO/USDT,MATIC/USDT'),
+        ('active_pairs','BNB/USDT,SOL/USDT,XRP/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT,ATOM/USDT,NEAR/USDT,ARB/USDT'),
         ('bot_running','false'), ('starting_balance','1000'),
         ('trailing_stop_enabled','true'), ('trailing_stop_pct','0.8'),
         ('partial_close_enabled','true'), ('partial_close_at_pct','0.8'),
@@ -132,7 +132,15 @@ def init_db():
     for k,v in scalp_defaults:
         c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,v))
 
-    # Remove consistent losers: LINK, ENJ, BTC, ETH from active pairs
+    # Restore active pairs if empty (migration bug wiped them)
+    try:
+        cur = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
+        if not cur or not cur[0] or cur[0].strip() == '':
+            good_pairs = 'BNB/USDT,SOL/USDT,XRP/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT,ATOM/USDT,NEAR/USDT,ARB/USDT'
+            c.execute("INSERT OR REPLACE INTO settings VALUES ('active_pairs',?)", (good_pairs,))
+    except: pass
+
+        # Remove consistent losers: LINK, ENJ, BTC, ETH from active pairs
     try:
         cur_pairs = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
         if cur_pairs:
@@ -143,7 +151,15 @@ def init_db():
                 c.execute("UPDATE settings SET value=? WHERE key='active_pairs'", (','.join(pairs),))
     except: pass
 
-    # Remove consistent losers: LINK, ENJ, BTC, ETH from active pairs
+    # Restore active pairs if empty (migration bug wiped them)
+    try:
+        cur = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
+        if not cur or not cur[0] or cur[0].strip() == '':
+            good_pairs = 'BNB/USDT,SOL/USDT,XRP/USDT,AVAX/USDT,DOT/USDT,AAVE/USDT,UNI/USDT,TON/USDT,ZEC/USDT,ATOM/USDT,NEAR/USDT,ARB/USDT'
+            c.execute("INSERT OR REPLACE INTO settings VALUES ('active_pairs',?)", (good_pairs,))
+    except: pass
+
+        # Remove consistent losers: LINK, ENJ, BTC, ETH from active pairs
     try:
         cur_pairs = c.execute("SELECT value FROM settings WHERE key='active_pairs'").fetchone()
         if cur_pairs:
@@ -171,14 +187,9 @@ def init_db():
             c.execute("UPDATE settings SET value='10' WHERE key='capital_floor_pct'")
     except: pass
 
-    # Add KAT and other losers to flagged pairs
+    # Set flagged pairs — known losers only, don't over-flag
     try:
-        cur = c.execute("SELECT value FROM settings WHERE key='flagged_pairs'").fetchone()
-        if cur:
-            flagged = set(cur[0].split(','))
-            flagged.update(['KAT/USDT','ORCA/USDT','ZBT/USDT','TRUMP/USDT'])
-            c.execute("UPDATE settings SET value=? WHERE key='flagged_pairs'",
-                      (','.join(f for f in flagged if f),))
+        c.execute("UPDATE settings SET value='KAT/USDT,ORCA/USDT,ZBT/USDT,TRUMP/USDT,PENGU/USDT,ENJ/USDT,LINK/USDT,BTC/USDT,ETH/USDT' WHERE key='flagged_pairs'")
     except: pass
 
     # Reset SL/TP if brain set them too tight
