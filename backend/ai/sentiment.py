@@ -172,7 +172,7 @@ def llm_analyze_news(headlines, pair):
         score  = float(result.get('score', 0))
         label  = result.get('label', 'neutral')
         reason = result.get('reasoning', '')
-        if result.get('already_priced_in'): score *= 0.3
+        if result.get('already_priced_in'): score *= 0.7  # slight reduction, not a blocker
         from db.activitylog import log as alog
         alog('ai', f'Sentiment {pair}: {label} ({score:+.2f}) — {reason}',
              detail={'pair':pair,'score':round(score,3),'label':label,
@@ -286,9 +286,11 @@ def llm_trade_decision(pair, signal, confidence, indicators, sentiment_score, re
                     f'- General crypto market fear does NOT block coin-specific technical signals\n'
                     f'- A hack on Protocol X does not block trading Protocol Y\n'
                     f'- Ranging regime is fine for mean-reversion trades in BOTH directions\n'
-                    f'- Only block if: news is DIRECTLY about THIS coin negatively, or confidence <50\n'
-                    f'- NEVER reject solely because RSI is not extreme — confluence of indicators matters more\n'
-                    f'- When in doubt, APPROVE — missing a good trade is worse than taking a small loss\n\n'
+                    f'- Only block if: news is DIRECTLY catastrophic for THIS specific coin (hack, delisting, fraud)\n'
+                    f'- NEVER reject for macro uncertainty, ranging markets, or borderline RSI levels\n'
+                    f'- NEVER reject solely because RSI is not extreme — confluence of 11 indicators means the signal is real\n'
+                    f'- DEFAULT TO APPROVE — this system has multiple filters already. Your job is only to catch coin-specific disasters\n'
+                    f'- When in doubt, APPROVE. A false positive is far less harmful than blocking valid signals\n\n'
                     f'Respond JSON only:\n'
                     f'{{"approved":<true|false>,"reasoning":"one sentence",'
                     f'"adjusted_confidence":<0-100>,"risk_level":"low|medium|high"}}'}]},
