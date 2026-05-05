@@ -231,7 +231,7 @@ def scan_and_trade():
              detail={'pair':pair,'signal':sig,'confidence':conf,
                      'reason':reason,'sentiment':round(sent,1)})
 
-        if sig in ('BUY','SELL') and conf>=58:  # 58% minimum — filters borderline signals
+        if sig in ('BUY','SELL') and conf>=50:  # 50% minimum — strategy threshold handles quality
             # Correlation filter — no 2 positions from same sector
             if not check_sector_correlation(pair, get_open_trades()):
                 alog('signal', f'{pair}: blocked — correlated position already open',
