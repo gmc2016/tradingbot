@@ -28,6 +28,13 @@ SECTORS = {
 
 _cooldowns = {}
 
+def clear_all_cooldowns():
+    """Clear all pair cooldowns — called on startup to fix brain death loop."""""
+    global _cooldowns
+    _cooldowns = {}
+    from db.activitylog import log as alog
+    alog('system', 'All pair cooldowns cleared on startup')
+
 def set_cooldown(pair, minutes):
     from datetime import timedelta
     _cooldowns[pair] = datetime.now(timezone.utc) + timedelta(minutes=minutes)
@@ -336,7 +343,7 @@ def generate_signal(df, sentiment_score=50, strategy='combined',
 
     # ── Signal decision ───────────────────────────────────────────────────────
     sig = 'HOLD'; conf = 0; reason = ''; sl_price = tp_price = None
-    threshold = 5  # higher threshold = higher quality
+    threshold = 4  # 4/14 minimum — with 11 layers this is solid quality
 
     if buy_score >= threshold and buy_score > sell_score:
         # SuperTrend regime block
@@ -344,7 +351,7 @@ def generate_signal(df, sentiment_score=50, strategy='combined',
             sig = 'HOLD'; reason = f'BUY blocked — ST strong downtrend (score:{buy_score})'
         else:
             sig  = 'BUY'
-            conf = min(100, int(buy_score / 14 * 100))
+            conf = min(100, int(40 + (buy_score / 14) * 60))
             reason = ' + '.join(buy_r[:4])
 
     elif sell_score >= threshold and sell_score > buy_score:
@@ -353,7 +360,7 @@ def generate_signal(df, sentiment_score=50, strategy='combined',
             sig = 'HOLD'; reason = f'SELL blocked — ST strong uptrend (score:{sell_score})'
         else:
             sig  = 'SELL'
-            conf = min(100, int(sell_score / 14 * 100))
+            conf = min(100, int(40 + (sell_score / 14) * 60))
             reason = ' + '.join(sell_r[:4])
     else:
         reason = f'Mixed (B:{buy_score} S:{sell_score} need {threshold})'
