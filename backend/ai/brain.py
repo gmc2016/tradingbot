@@ -147,9 +147,21 @@ def apply_brain_recommendations(result):
     from bot.strategy import set_cooldown
     changes = []
 
-    for pair in result.get('pairs_to_pause', []):
-        set_cooldown(pair, 60)
-        changes.append(f'cooldown:{pair}')
+    # Only apply cooldowns if there are actual losing trades — NOT on zero-trade days
+    # Zero trades = strategy too strict, not that pairs are bad
+    try:
+        from db.database import get_conn
+        conn = get_conn()
+        recent_losses = conn.execute(
+            """SELECT COUNT(*) FROM trades WHERE status='closed' AND pnl<0
+               AND datetime(closed_at)>datetime('now','-24 hours')""").fetchone()[0]
+        conn.close()
+        if recent_losses >= 3:  # only cooldown after 3+ actual losses
+            for pair in result.get('pairs_to_pause', []):
+                set_cooldown(pair, 60)
+                changes.append(f'cooldown:{pair}')
+    except:
+        pass  # don't apply cooldowns if we can't check
 
     log_entry = {
         'timestamp':     datetime.utcnow().isoformat(),
