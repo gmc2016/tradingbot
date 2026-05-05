@@ -253,6 +253,12 @@ scheduler.add_job(macro_cycle,  'interval',minutes=15, id='macro',  max_instance
 scheduler.add_job(scanner_cycle,'interval',hours=1,    id='scanner',max_instances=1,misfire_grace_time=300)
 scheduler.add_job(brain_cycle,  'interval',minutes=30, id='brain',  max_instances=1,misfire_grace_time=120)
 scheduler.add_job(grid_cycle,   'interval',minutes=5,  id='grid',   max_instances=1,misfire_grace_time=30,coalesce=True)
+# Clear brain-applied cooldowns on startup
+try:
+    from bot.strategy import clear_all_cooldowns
+    clear_all_cooldowns()
+except: pass
+
 scheduler.start()
 start_cache_refresh()
 eventlet.spawn_after(3, start_price_stream)
