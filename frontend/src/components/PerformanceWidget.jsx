@@ -65,13 +65,11 @@ export default function PerformanceWidget() {
 
         <div style={{ width:1, height:20, background:'var(--border)' }}/>
 
-        {/* Capital protection floor */}
+        {/* Today P&L status */}
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <span style={{ fontSize:10, color:'var(--text-3)' }}>Floor</span>
-          <span style={{ fontSize:11, color:'var(--text-2)' }}>${(perf.floor_balance||0).toFixed(0)}</span>
-          <span style={{ fontSize:10,
-            color: parseFloat(floorPct) > 5 ? 'var(--green)' : 'var(--amber)' }}>
-            {floorPct}% above floor
+          <span style={{ fontSize:10, color:'var(--text-3)' }}>Demo</span>
+          <span style={{ fontSize:11, color:'var(--teal)', fontWeight:600 }}>
+            Always running
           </span>
         </div>
 
