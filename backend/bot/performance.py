@@ -104,34 +104,49 @@ def get_flagged_pairs():
 
 def check_capital_protection():
     """
-    Capital protection floor.
-    If balance drops below threshold → pause bot and alert.
+    Capital protection — daily loss limit only.
+    Demo mode: no floor (demo money is not real, don't interrupt testing).
+    Live mode: stops bot if daily loss exceeds max_daily_loss_pct setting.
     Returns True if trading should continue, False if should pause.
     """
     from db.database import get_setting, set_setting
     from db.activitylog import log as alog
-    from bot.engine import get_demo_balance
 
     mode = get_setting('trading_mode') or 'demo'
-    if mode != 'demo': return True  # live trading manages its own risk
 
-    starting = float(get_setting('starting_balance') or 1000)
-    floor_pct = float(get_setting('capital_floor_pct') or '8') / 100
-    floor_amt = starting * (1 - floor_pct)  # default 8% drawdown = $920 floor
+    # Demo mode — no capital protection, never stop the bot
+    # Demo losses are not real money; stopping just interrupts testing
+    if mode == 'demo':
+        return True
 
-    balance = get_demo_balance()
+    # Live mode — daily loss limit
+    try:
+        from bot.engine import get_demo_balance
+        from db.database import get_conn
+        max_loss_pct = float(get_setting('max_daily_loss_pct') or '5') / 100
+        starting     = float(get_setting('starting_balance') or 1000)
+        max_loss_amt = starting * max_loss_pct  # e.g. 5% of $1000 = $50/day
 
-    if balance < floor_amt:
-        if get_setting('bot_running') == 'true':
-            set_setting('bot_running', 'false')
-            alog('system',
-                 f'🛑 Capital protection triggered — balance ${balance:.2f} '
-                 f'below floor ${floor_amt:.2f} ({floor_pct*100:.0f}% drawdown). '
-                 f'Bot paused. Review and restart manually.',
-                 level='warning',
-                 detail={'balance': balance, 'floor': floor_amt,
-                         'drawdown_pct': round((starting-balance)/starting*100, 1)})
-        return False
+        conn = get_conn()
+        today_pnl = conn.execute(
+            """SELECT COALESCE(SUM(pnl),0) FROM trades
+               WHERE status='closed' AND date(closed_at)=date('now')""").fetchone()[0]
+        conn.close()
+
+        if today_pnl < -max_loss_amt:
+            if get_setting('bot_running') == 'true':
+                set_setting('bot_running', 'false')
+                alog('system',
+                     f'🛑 Daily loss limit hit — lost ${abs(today_pnl):.2f} today '
+                     f'(limit: ${max_loss_amt:.2f}). Bot paused until tomorrow.',
+                     level='warning',
+                     detail={'today_pnl': round(today_pnl, 2),
+                             'limit': max_loss_amt, 'mode': mode})
+            return False
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug(f'Capital protection: {e}')
+
     return True
 
 def get_compounded_position_size():
