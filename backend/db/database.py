@@ -45,6 +45,7 @@ def init_db():
         ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
         ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
         ('capital_floor_pct','10'),
+        ('max_daily_loss_pct','5'),
         ('compounding_enabled','false'),
         # Grid trading
         ('grid_enabled','false'), ('grid_pair','BTC/USDT'),
@@ -77,6 +78,7 @@ def init_db():
         ('watchlist','BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT,LINK/USDT'),
         ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
         ('capital_floor_pct','10'),
+        ('max_daily_loss_pct','5'),
         ('compounding_enabled','false'),
         # Grid trading
         ('grid_enabled','false'), ('grid_pair','BTC/USDT'),
@@ -109,6 +111,7 @@ def init_db():
     perf_defaults = [
         ('flagged_pairs','BTC/USDT,ETH/USDT,LINK/USDT,ENJ/USDT,KAT/USDT,ORCA/USDT,ZBT/USDT'),
         ('capital_floor_pct','10'),
+        ('max_daily_loss_pct','5'),
         ('compounding_enabled','false'),
         # Grid trading
         ('grid_enabled','false'), ('grid_pair','BTC/USDT'),
@@ -180,11 +183,9 @@ def init_db():
     for k,v in new_settings:
         c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',(k,v))
 
-    # Update capital floor to 10% (safer)
+    # Add daily loss limit setting
     try:
-        cur = c.execute("SELECT value FROM settings WHERE key='capital_floor_pct'").fetchone()
-        if cur and float(cur[0]) < 10:
-            c.execute("UPDATE settings SET value='10' WHERE key='capital_floor_pct'")
+        c.execute("INSERT OR IGNORE INTO settings VALUES ('max_daily_loss_pct','5')")
     except: pass
 
     # Set flagged pairs — known losers only, don't over-flag
